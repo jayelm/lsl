@@ -2,6 +2,10 @@
 
 This code is graciously adapted from code written by [Mike Wu](https://www.mikehwu.com/).
 
+## Dependencies
+
+Tested with Python 3.7.4, torch 1.3.0, torchvision 0.4.1, sklearn 0.21.3, and numpy 1.17.2.
+
 ## Data
 
 Download data [here](http://nlp.stanford.edu/data/muj/shapeworld_4k.zip)
