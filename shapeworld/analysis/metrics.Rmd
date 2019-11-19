@@ -1,0 +1,50 @@
+---
+title: "Metrics analysis"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+library(cowplot)
+library(jsonlite)
+theme_set(theme_cowplot())
+```
+
+# Standard eval
+
+```{r}
+MODELS <- c(
+  'l3' = 'L3',
+  'lsl' = 'LSL',
+  'meta' = 'Meta'
+)
+```
+
+```{r}
+metrics <- sapply(names(MODELS), function(model) {
+  metrics_file <- paste0('../exp/', model, '/metrics.json')
+  metrics_df <- as.data.frame(read_json(metrics_file, simplifyVector = TRUE)) %>%
+    tbl_df %>%
+    select(train_acc, val_acc, val_same_acc, test_acc, test_same_acc) %>%
+    mutate(avg_val_acc = (val_acc + val_same_acc) / 2,
+           avg_test_acc = (test_acc + test_same_acc) / 2)
+  metrics_df %>%
+    mutate(epoch = 1:nrow(metrics_df)) %>%
+    mutate(model = MODELS[model])
+}, simplify = FALSE) %>%
+  do.call(rbind, .) %>%
+  mutate(model = factor(model))
+
+metrics_long <- metrics %>%
+  gather('metric', 'value', -epoch, -model) %>%
+  mutate(metric = factor(metric, levels = c('train_acc', 'avg_val_acc', 'val_acc', 'val_same_acc', 'avg_test_acc', 'test_acc', 'test_same_acc')))
+```
+
+```{r fig.width=3.5, fig.height=2}
+metric_names <- c('train_acc' = 'Train', 'avg_val_acc' = 'Val', 'avg_test_acc' = 'Test')
+ggplot(metrics_long %>% filter(metric %in% c('train_acc', 'avg_val_acc', 'avg_test_acc')) %>% rename(Model = model), aes(x = epoch, y = value, color = Model)) +
+  geom_line() +
+  facet_wrap(~ metric, labeller = as_labeller(metric_names)) +
+  xlab('Epoch') +
+  ylab('Accuracy')
+```
