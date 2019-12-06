@@ -8,4 +8,4 @@ python lsl/caption.py --cuda \
     --data_dir $DATA_DIR \
     --batch_size 100 \
     --seed $RANDOM \
-    exp/cap/"$DATA_DIR"_"$BACKBONE"
+    exp/cap/"$(basename $DATA_DIR)"_"$BACKBONE"
