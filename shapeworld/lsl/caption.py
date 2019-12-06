@@ -325,6 +325,10 @@ if __name__ == "__main__":
     best_val_same_bleu = 0
     best_test_bleu = 0
     best_test_same_bleu = 0
+    best_val_em = 0
+    best_val_same_em = 0
+    best_test_em = 0
+    best_test_same_em = 0
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
@@ -356,20 +360,22 @@ if __name__ == "__main__":
             if is_best_epoch:
                 best_epoch = epoch
                 best_epoch_bleu = epoch_bleu
+
                 best_val_bleu = val_bleu
                 best_val_same_bleu = val_same_bleu
                 best_test_bleu = test_bleu
+                best_test_same_bleu = test_same_bleu
+
                 best_val_em = val_em
                 best_val_same_em = val_same_em
                 best_test_em = test_em
-                best_test_same_em = test_same_em
                 best_test_same_em = test_same_em
                 # Save best predictions
                 utils.save_predictions(val_pred, val_trues, args.exp_dir,
                                        filename='val_predictions.csv')
 
-            metrics['train_bleu'].append(train_bleu)
             metrics['epoch'].append(epoch)
+            metrics['train_bleu'].append(train_bleu)
             metrics['val_bleu'].append(val_bleu)
             metrics['val_same_bleu'].append(val_same_bleu)
             metrics['test_bleu'].append(test_bleu)
