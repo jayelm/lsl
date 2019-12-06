@@ -1,12 +1,12 @@
 #!/bin/bash
 
-if [ "$#" -eq 1 ]; then
+if [ "$#" -ge 1 ]; then
     DATA_DIR="$1"
 else
     DATA_DIR="/mnt/fs5/muj/shapeworld_mine_8shot_easy"
 fi
 
-if [ "$#" -eq 2 ]; then
+if [ "$#" -ge 2 ]; then
     BACKBONE="$2"
 else
     BACKBONE="conv4"
