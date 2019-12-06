@@ -1,0 +1,55 @@
+---
+title: "Caption analysis"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+library(cowplot)
+library(jsonlite)
+theme_set(theme_cowplot())
+```
+
+# Standard eval
+
+```{r}
+MODELS <- c(
+  'cap/shapeworld_mine_8shot_easy_conv4' = 'Easy (Conv4)',
+  'cap/conv4' = 'L3 (Conv4)'
+)
+```
+
+```{r}
+metrics <- sapply(names(MODELS), function(model) {
+  metrics_file <- paste0('../exp/', model, '/metrics.json')
+  if (!file.exists(metrics_file)) {
+    return(NULL)
+  }
+  metrics_df <- as.data.frame(read_json(metrics_file, simplifyVector = TRUE)) %>%
+    tbl_df %>%
+    mutate(avg_val_bleu = (val_bleu + val_same_bleu) / 2,
+           avg_test_bleu = (test_bleu + test_same_bleu) / 2,
+           avg_val_em = (val_em + val_same_em) / 2,
+           avg_test_em = (test_em + test_same_em) / 2
+           )
+  metrics_df %>%
+    mutate(model = MODELS[model])
+}, simplify = FALSE) %>%
+  do.call(rbind, .) %>%
+  mutate(model = factor(model))
+
+metrics_long <- metrics %>%
+  gather('metric', 'value', -epoch, -model)
+```
+
+```{r fig.width=3.5, fig.height=2}
+mtp <- metrics_long %>%
+  rename(Model = model) %>%
+  filter(metric %in% c('train_bleu', 'avg_val_bleu', 'avg_test_bleu'))
+
+ggplot(mtp, aes(x = epoch, y = value, color = Model)) +
+  geom_line() +
+  facet_wrap(~ metric) + 
+  xlab('Epoch') +
+  ylab('Accuracy')
+```
