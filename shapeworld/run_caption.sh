@@ -12,9 +12,15 @@ else
     BACKBONE="conv4"
 fi
 
+if [ "$BACKBONE" = "resnet18" ]; then
+    BATCH_SIZE="32"
+else
+    BATCH_SIZE="100"
+fi
+
 python lsl/caption.py --cuda \
     --backbone $BACKBONE \
     --data_dir $DATA_DIR \
-    --batch_size 100 \
+    --batch_size $BATCH_SIZE \
     --seed $RANDOM \
     exp/cap/"$(basename $DATA_DIR)"_"$BACKBONE"
