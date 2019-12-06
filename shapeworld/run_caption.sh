@@ -1,7 +1,9 @@
 #!/bin/bash
 
+BACKBONE="conv4"
+
 python lsl/caption.py --cuda \
-    --backbone vgg16_fixed \
+    --backbone $BACKBONE \
     --batch_size 100 \
     --seed $RANDOM \
-    exp/cap/vgg16_fixed
+    exp/cap/$BACKBONE
