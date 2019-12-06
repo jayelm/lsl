@@ -24,6 +24,7 @@ from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
+import bleu
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -467,6 +468,7 @@ if __name__ == "__main__":
                     hypo_loss = F.cross_entropy(hypo_out_2d,
                                                 hint_seq_2d,
                                                 reduction='none')
+                    # NOTE: Need to mask out!!
                     hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
                     hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
 

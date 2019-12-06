@@ -11,10 +11,11 @@ import numpy as np
 import torch.utils.data as data
 from torchvision import transforms
 
+from collections import Counter
 from utils import next_random, OrderedCounter
 
 # Set your data directory here!
-DATA_DIR = '/u/scr/muj/shapeworld_4k'
+DATA_DIR = '/mnt/fs5/muj/shapeworld_4k'
 SPLIT_OPTIONS = ['train', 'val', 'test', 'val_same', 'test_same']
 
 logging.getLogger(__name__).setLevel(logging.INFO)
@@ -660,6 +661,82 @@ class ShapeWorld(data.Dataset):
         return texts
 
 
+REVERSE_RELATIONS = {
+    'above': 'below',
+    'left': 'right',
+    'right': 'left',
+    'below': 'above'
+}
+
+
+def compute_alternatives(hints):
+    """
+    Compute alternative hints
+    specifically, if we have a hint
+    x ABOVE y
+    an equally compatible hint is
+    y ABOVE x
+    and the model should not be penalized.
+
+    :param hints: list of hints, each hint is a tokenized list
+    :returns: list of list of equally plausible hints (including the original hint)
+    """
+    alternatives = []
+    for hint in hints:
+        alts = [hint]
+        # Find the relation
+        rel, rel_idx = get_relation(hint)
+        rev_rel = REVERSE_RELATIONS[rel]
+
+        #  Sentence has form
+        #  [<sos>, a, *first_shape, is, *rel, {a,an}, *second_shape, <eos>]
+        #  We want
+        #  [<sos>, a, *second_shape, is, *rev_rel, {a,an}, *second_shape, <eos>]
+        rev_hint = hint[:]
+        rev_hint[rel_idx] = rev_rel
+
+        fst, snd = hint[:rel_idx], hint[rel_idx:]
+        # fst: [<sos>, a, ..., is]
+        fst_start = 1
+        fst_end = fst.index('is')
+        fst_shape = fst[fst_start:fst_end][:]
+        # snd: [..., {a,an}, ..., ., <eos>]
+        try:
+            snd_start = snd.index('a')
+        except ValueError:
+            snd_start = snd.index('an')
+        snd_end = -2
+        snd_shape = snd[snd_start:snd_end][:]
+
+        # Swap shapes in first and second parts
+        rev_fst = [*fst[:fst_start], *snd_shape, *fst[fst_end:]]
+        rev_snd = [rev_rel, *snd[1:snd_start], *fst_shape, *snd[snd_end:]]
+
+        rev_hint = [*rev_fst, *rev_snd]
+
+        alts = [hint, rev_hint]
+        # Number of tokens should be the same, except rev
+        alt_counters = [Counter([t for t in h if t not in {rel, rev_rel}]) for h in alts]
+        assert all(ac == alt_counters[0] for ac in alt_counters), alt_counters
+        alternatives.append(alts)
+
+    return alternatives
+
+
+def get_relation(hint):
+    """
+    Get relation of the hint. Raises runtimeerror if no relation is found
+
+    :param hint: tokenized hint
+    """
+    for maybe_rel in ['above', 'below', 'left', 'right']:
+        if maybe_rel in hint:
+            rel = maybe_rel
+            rel_idx = hint.index(rel)
+            return rel, rel_idx
+    raise RuntimeError("Didn't find relation: {}".format(hint))
+
+
 def extract_features(hints):
     """
     Extract features from hints
@@ -667,14 +744,8 @@ def extract_features(hints):
     all_feats = []
     for hint in hints:
         feats = []
-        for maybe_rel in ['above', 'below', 'left', 'right']:
-            if maybe_rel in hint:
-                rel = maybe_rel
-                rel_idx = hint.index(rel)
-                break
-        else:
-            raise RuntimeError("Didn't find relation: {}".format(hint))
         # Add relation
+        rel, rel_idx = get_relation(hint)
         feats.append('rel:{}'.format(rel))
         fst, snd = hint[:rel_idx], hint[rel_idx:]
         # fst: [<sos>, a, ..., is]
@@ -696,3 +767,14 @@ def extract_features(hints):
                         feats.append('{}:shape:{}'.format(name, feat))
         all_feats.append(feats)
     return all_feats
+
+
+def remove_special_tokens(hint):
+    """
+    Remove SOS from a hints
+    """
+    hint_cleaned = []
+    for tok in hint:
+        if tok not in {SOS_TOKEN, EOS_TOKEN, PAD_TOKEN}:
+            hint_cleaned.append(tok)
+    return hint_cleaned

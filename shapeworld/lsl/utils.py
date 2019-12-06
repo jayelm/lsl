@@ -9,6 +9,7 @@ import shutil
 
 import numpy as np
 import torch
+import pandas as pd
 
 random_counter = [0]
 
@@ -61,6 +62,21 @@ def save_checkpoint(state, is_best, folder='./',
     if is_best:
         shutil.copyfile(os.path.join(folder, filename),
                         os.path.join(folder, 'model_best.pth.tar'))
+
+
+def save_predictions(pred, trues, folder='./',
+                     filename='predictions.csv'):
+    if not os.path.isdir(folder):
+        os.mkdir(folder)
+    preds_dict = {f'true_{i}': t for i, t in enumerate(zip(*trues))}
+    preds_dict['pred'] = pred
+    preds_dict = {
+        k: [' '.join(v) for v in vs] for k, vs
+        in preds_dict.items()
+    }
+    x = pd.DataFrame(preds_dict)
+    fname = os.path.join(folder, filename)
+    x.to_csv(fname, index=False)
 
 
 def merge_args_with_dict(args, dic):
