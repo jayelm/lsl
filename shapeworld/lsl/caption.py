@@ -368,13 +368,13 @@ if __name__ == "__main__":
                 utils.save_predictions(val_pred, val_trues, args.exp_dir,
                                        filename='val_predictions.csv')
 
-            #  metrics['train_bleu'].append(train_bleu)
+            metrics['train_bleu'].append(train_bleu)
             metrics['epoch'].append(epoch)
             metrics['val_bleu'].append(val_bleu)
             metrics['val_same_bleu'].append(val_same_bleu)
             metrics['test_bleu'].append(test_bleu)
             metrics['test_same_bleu'].append(test_same_bleu)
-            #  metrics['train_em'].append(train_em)
+            metrics['train_em'].append(train_em)
             metrics['val_em'].append(val_em)
             metrics['val_same_em'].append(val_same_em)
             metrics['test_em'].append(test_em)

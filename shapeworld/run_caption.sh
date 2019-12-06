@@ -1,7 +1,16 @@
 #!/bin/bash
 
-BACKBONE="conv4"
-DATA_DIR="/mnt/fs5/muj/shapeworld_mine_8shot_easy"
+if [ "$#" -eq 1 ]; then
+    DATA_DIR="$1"
+else
+    DATA_DIR="/mnt/fs5/muj/shapeworld_mine_8shot_easy"
+fi
+
+if [ "$#" -eq 2 ]; then
+    BACKBONE="$2"
+else
+    BACKBONE="conv4"
+fi
 
 python lsl/caption.py --cuda \
     --backbone $BACKBONE \
