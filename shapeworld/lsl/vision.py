@@ -381,7 +381,11 @@ class ConvNet(nn.Module):
 class ConvNetNopool(nn.Module):
     # Relation net use a 4 layer conv with pooling in only first two layers,
     # else no pooling
-    def __init__(self, depth, flatten=False):
+    def __init__(self, depth, flatten=False, stop_pooling_after=2):
+        """
+        param :stop_pooling_after: stop pooling after the nth layer (n is
+        1-indexed!!)
+        """
         super(ConvNetNopool, self).__init__()
         trunk = []
         for i in range(depth):
@@ -390,8 +394,8 @@ class ConvNetNopool(nn.Module):
             # Only first two layer has pooling and no padding
             B = ConvBlock(indim,
                           outdim,
-                          pool=(i in [0, 1]),
-                          padding=0 if i in [0, 1] else 1)
+                          pool=(i in range(stop_pooling_after)),
+                          padding=0 if i in range(stop_pooling_after) else 1)
             trunk.append(B)
 
         if flatten:
@@ -400,7 +404,12 @@ class ConvNetNopool(nn.Module):
         self.trunk = nn.Sequential(*trunk)
         if flatten:
             # FIXME: This dimension is for conv4 only
-            self.final_feat_dim = 12544
+            if stop_pooling_after == 1:
+                self.final_feat_dim = 61504
+            elif stop_pooling_after == 2:
+                self.final_feat_dim = 12544
+            else:
+                raise NotImplementedError(f"pooling after {stop_pooling_after}")
         else:
             self.final_feat_dim = [64, 19, 19]
 
@@ -531,6 +540,13 @@ def Conv6():
 
 def Conv4NP():
     return ConvNetNopool(4, flatten=True)
+
+
+def Conv4NP2():
+    """
+    Convnet but only 2x2 pooling in the first layer (results in big reprs!)
+    """
+    return ConvNetNopool(4, flatten=True, stop_pooling_after=1)
 
 
 def Conv6NP():
