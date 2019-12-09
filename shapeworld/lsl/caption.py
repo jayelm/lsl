@@ -24,7 +24,7 @@ import datasets
 from models import ImageRep, TextRep, TextProposal, ExWrapper
 from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
-from vision import Conv4NP, Conv4NP2, ResNet18
+from vision import Conv4NP, Conv4NP2, ResNet18, ResNet18NP
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 import bleu
 
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('exp_dir', type=str, help='Output directory')
     parser.add_argument('--backbone',
-                        choices=['vgg16_fixed', 'conv4', 'conv4_2', 'resnet18'],
+                        choices=['vgg16_fixed', 'conv4', 'conv4_2', 'resnet18', 'resnet18np'],
                         default='vgg16_fixed',
                         help='Image model')
     parser.add_argument('--max_train',
@@ -105,7 +105,7 @@ if __name__ == "__main__":
 
     # train dataset will return (image, label, hint_input, hint_target, hint_length)
     precomputed_features = args.backbone == 'vgg16_fixed'
-    preprocess = args.backbone == 'resnet18'
+    preprocess = 'resnet18' in args.backbone
     train_dataset = ShapeWorld(
         split='train',
         vocab=None,
@@ -182,6 +182,8 @@ if __name__ == "__main__":
         backbone_model = Conv4NP2()
     elif args.backbone == 'resnet18':
         backbone_model = ResNet18()
+    elif args.backbone == 'resnet18np':
+        backbone_model = ResNet18NP()
     else:
         raise NotImplementedError(args.backbone)
 

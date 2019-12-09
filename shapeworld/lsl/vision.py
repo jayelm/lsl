@@ -476,7 +476,8 @@ class ResNet(nn.Module):
                  block,
                  list_of_num_layers,
                  list_of_out_dims,
-                 flatten=True):
+                 flatten=True,
+                 pool=True):
         # list_of_num_layers specifies number of layers in each stage
         # list_of_out_dims specifies number of output channel for each stage
         super(ResNet, self).__init__()
@@ -499,12 +500,14 @@ class ResNet(nn.Module):
             bn1 = nn.BatchNorm2d(64)
 
         relu = nn.ReLU()
-        pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         init_layer(conv1)
         init_layer(bn1)
 
-        trunk = [conv1, bn1, relu, pool1]
+        trunk = [conv1, bn1, relu]
+        if True:
+            pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            trunk.append(pool1)
 
         indim = 64
         for i in range(4):
@@ -516,10 +519,13 @@ class ResNet(nn.Module):
                 indim = list_of_out_dims[i]
 
         if flatten:
-            avgpool = nn.AvgPool2d(7)
-            trunk.append(avgpool)
+            if pool:
+                avgpool = nn.AvgPool2d(7)
+                trunk.append(avgpool)
+                self.final_feat_dim = indim
+            else:
+                self.final_feat_dim = 25088
             trunk.append(Flatten())
-            self.final_feat_dim = indim
         else:
             self.final_feat_dim = [indim, 7, 7]
 
@@ -566,7 +572,11 @@ def ResNet10(flatten=True):
 
 
 def ResNet18(flatten=True):
-    return ResNet(SimpleBlock, [2, 2, 2, 2], [64, 128, 256, 512], flatten)
+    return ResNet(SimpleBlock, [2, 2, 2, 2], [64, 128, 256, 512], flatten, pool=True)
+
+
+def ResNet18NP(flatten=True):
+    return ResNet(SimpleBlock, [2, 2, 2, 2], [64, 128, 256, 512], flatten, pool=False)
 
 
 def PretrainedResNet18():

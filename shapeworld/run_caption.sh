@@ -15,7 +15,11 @@ fi
 if [ "$BACKBONE" = "resnet18" ]; then
     BATCH_SIZE="32"
 else
-    BATCH_SIZE="100"
+    if [ "$BACKBONE" = "resnet18np" ]; then
+        BATCH_SIZE="32"
+    else
+        BATCH_SIZE="100"
+    fi
 fi
 
 python lsl/caption.py --cuda \
@@ -23,4 +27,4 @@ python lsl/caption.py --cuda \
     --data_dir $DATA_DIR \
     --batch_size $BATCH_SIZE \
     --seed $RANDOM \
-    exp/cap/"$(basename $DATA_DIR)"_"$BACKBONE"
+    exp/cap/"$(basename $DATA_DIR)"_"$BACKBONE""1024"

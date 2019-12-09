@@ -22,7 +22,7 @@ from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, TextProposal, ExWrapper
 from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
-from vision import Conv4NP, Conv4NP2, ResNet18
+from vision import Conv4NP, Conv4NP2, ResNet18, ResNet18NP
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 import bleu
 
