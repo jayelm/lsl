@@ -45,3 +45,14 @@ python lsl/train.py --cuda \
     --data_dir ~/Git/shapeworld_mine_10shot_easy \
     exp/last/lsl_15_conv4
 "
+
+# L3
+nlprun -g 1 -r 16G -c 4 -a py37-muj "
+python lsl/train.py --cuda \
+    --backbone conv4 \
+    --infer_hyp \
+    --batch_size 100 \
+    --seed $RANDOM \
+    --data_dir ~/Git/shapeworld_mine_10shot_easy \
+    exp/last/l3_conv4
+"
