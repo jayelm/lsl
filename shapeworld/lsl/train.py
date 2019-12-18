@@ -22,7 +22,7 @@ from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, TextProposal, ExWrapper
 from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
-from vision import Conv4NP, Conv4NP2, ResNet18, ResNet18NP
+from vision import Conv4NP, Conv4NP2, ResNet18, ResNet18NP, CoordWrapper
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 import bleu
 
@@ -76,6 +76,9 @@ if __name__ == "__main__":
                         choices=['vgg16_fixed', 'conv4', 'conv4_2', 'resnet18'],
                         default='vgg16_fixed',
                         help='Image model')
+    parser.add_argument('--coordconv',
+                        action='store_true',
+                        help='Add coordinates')
     parser.add_argument(
         '--multimodal_concept',
         action='store_true',
@@ -321,15 +324,20 @@ if __name__ == "__main__":
     }
 
     if args.backbone == 'vgg16_fixed':
+        if args.coordconv:
+            raise RuntimeError("CoordConv doesn't work with precomputed features")
         backbone_model = None
     elif args.backbone == 'conv4':
-        backbone_model = Conv4NP()
+        backbone_model = Conv4NP(coordconv=args.coordconv)
     elif args.backbone == 'conv4_2':
-        backbone_model = Conv4NP2()
+        backbone_model = Conv4NP2(coordconv=args.coordconv)
     elif args.backbone == 'resnet18':
-        backbone_model = ResNet18()
+        backbone_model = ResNet18(coordconv=args.coordconv)
     else:
         raise NotImplementedError(args.backbone)
+
+    if args.coordconv:
+        backbone_model = CoordWrapper(backbone_model)
 
     image_model = ExWrapper(ImageRep(backbone_model))
     image_model = image_model.to(device)

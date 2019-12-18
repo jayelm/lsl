@@ -1,5 +1,4 @@
-"""
-Convolutional backbones. You can run L3/LSL with convnets trained from scratch;
+"""Convolutional backbones. You can run L3/LSL with convnets trained from scratch;
 results hold.
 
 This code is modified from https://github.com/wyharveychen/CloserLookFewShot
@@ -12,6 +11,59 @@ import math
 import torch.nn.functional as F
 from torch.nn.utils.weight_norm import WeightNorm
 import torchvision.models as models
+
+
+class CoordWrapper(nn.Module):
+    def __init__(self, backbone):
+        super().__init__()
+        assert backbone.coordconv, "Backbone must be CoordConv-enabled"
+        self.backbone = backbone
+        self.cc = AddCoords()
+        self.final_feat_dim = self.backbone.final_feat_dim
+
+    def forward(self, x):
+        x_cc = self.cc(x)
+        res = self.backbone(x_cc)
+        return res
+
+
+# From CoordConv-pytorch
+# https://github.com/mkocabas/CoordConv-pytorch/blob/master/CoordConv.py
+class AddCoords(nn.Module):
+
+    def __init__(self, with_r=False):
+        super().__init__()
+        self.with_r = with_r
+
+    def forward(self, input_tensor):
+        """
+        Args:
+            input_tensor: shape(batch, channel, x_dim, y_dim)
+        """
+        batch_size, _, x_dim, y_dim = input_tensor.size()
+
+        xx_channel = torch.arange(x_dim).repeat(1, y_dim, 1)
+        yy_channel = torch.arange(y_dim).repeat(1, x_dim, 1).transpose(1, 2)
+
+        xx_channel = xx_channel.float() / (x_dim - 1)
+        yy_channel = yy_channel.float() / (y_dim - 1)
+
+        xx_channel = xx_channel * 2 - 1
+        yy_channel = yy_channel * 2 - 1
+
+        xx_channel = xx_channel.repeat(batch_size, 1, 1, 1).transpose(2, 3)
+        yy_channel = yy_channel.repeat(batch_size, 1, 1, 1).transpose(2, 3)
+
+        ret = torch.cat([
+            input_tensor,
+            xx_channel.type_as(input_tensor),
+            yy_channel.type_as(input_tensor)], dim=1)
+
+        if self.with_r:
+            rr = torch.sqrt(torch.pow(xx_channel.type_as(input_tensor) - 0.5, 2) + torch.pow(yy_channel.type_as(input_tensor) - 0.5, 2))
+            ret = torch.cat([ret, rr], dim=1)
+
+        return ret
 
 
 class Identity(nn.Module):
@@ -356,11 +408,11 @@ class BottleneckBlock(nn.Module):
 
 
 class ConvNet(nn.Module):
-    def __init__(self, depth, flatten=True):
+    def __init__(self, depth, flatten=True, coordconv=False):
         super(ConvNet, self).__init__()
         trunk = []
         for i in range(depth):
-            indim = 3 if i == 0 else 64
+            indim = (5 if coordconv else 3) if i == 0 else 64
             outdim = 64
             # only pooling for fist 4 layers
             B = ConvBlock(indim, outdim,
@@ -370,6 +422,7 @@ class ConvNet(nn.Module):
         if flatten:
             trunk.append(Flatten())
 
+        self.coordconv = coordconv
         self.trunk = nn.Sequential(*trunk)
         self.final_feat_dim = 1600
 
@@ -381,7 +434,7 @@ class ConvNet(nn.Module):
 class ConvNetNopool(nn.Module):
     # Relation net use a 4 layer conv with pooling in only first two layers,
     # else no pooling
-    def __init__(self, depth, flatten=False, stop_pooling_after=2):
+    def __init__(self, depth, flatten=False, stop_pooling_after=2, coordconv=False):
         """
         param :stop_pooling_after: stop pooling after the nth layer (n is
         1-indexed!!)
@@ -389,7 +442,7 @@ class ConvNetNopool(nn.Module):
         super(ConvNetNopool, self).__init__()
         trunk = []
         for i in range(depth):
-            indim = 3 if i == 0 else 64
+            indim = (5 if coordconv else 3) if i == 0 else 64
             outdim = 64
             # Only first two layer has pooling and no padding
             B = ConvBlock(indim,
@@ -401,6 +454,7 @@ class ConvNetNopool(nn.Module):
         if flatten:
             trunk.append(Flatten())
 
+        self.coordconv = coordconv
         self.trunk = nn.Sequential(*trunk)
         if flatten:
             # FIXME: This dimension is for conv4 only
@@ -477,7 +531,8 @@ class ResNet(nn.Module):
                  list_of_num_layers,
                  list_of_out_dims,
                  flatten=True,
-                 pool=True):
+                 pool=True,
+                 coordconv=False):
         # list_of_num_layers specifies number of layers in each stage
         # list_of_out_dims specifies number of output channel for each stage
         super(ResNet, self).__init__()
@@ -491,7 +546,7 @@ class ResNet(nn.Module):
                               bias=False)
             bn1 = BatchNorm2d_fw(64)
         else:
-            conv1 = nn.Conv2d(3,
+            conv1 = nn.Conv2d(5 if coordconv else 3,
                               64,
                               kernel_size=7,
                               stride=2,
@@ -499,6 +554,7 @@ class ResNet(nn.Module):
                               bias=False)
             bn1 = nn.BatchNorm2d(64)
 
+        self.coordconv = coordconv
         relu = nn.ReLU()
 
         init_layer(conv1)
@@ -536,23 +592,24 @@ class ResNet(nn.Module):
         return out
 
 
-def Conv4():
-    return ConvNet(4)
+def Conv4(coordconv=False):
+    return ConvNet(4, coordconv=coordconv)
 
 
 def Conv6():
     return ConvNet(6)
 
 
-def Conv4NP():
-    return ConvNetNopool(4, flatten=True)
+def Conv4NP(coordconv=False):
+    return ConvNetNopool(4, flatten=True, coordconv=coordconv)
 
 
-def Conv4NP2():
+def Conv4NP2(coordconv=False):
     """
     Convnet but only 2x2 pooling in the first layer (results in big reprs!)
     """
-    return ConvNetNopool(4, flatten=True, stop_pooling_after=1)
+    return ConvNetNopool(4, flatten=True, stop_pooling_after=1,
+                         coordconv=coordconv)
 
 
 def Conv6NP():
@@ -571,12 +628,18 @@ def ResNet10(flatten=True):
     return ResNet(SimpleBlock, [1, 1, 1, 1], [64, 128, 256, 512], flatten)
 
 
+<<<<<<< HEAD
 def ResNet18(flatten=True):
     return ResNet(SimpleBlock, [2, 2, 2, 2], [64, 128, 256, 512], flatten, pool=True)
 
 
 def ResNet18NP(flatten=True):
     return ResNet(SimpleBlock, [2, 2, 2, 2], [64, 128, 256, 512], flatten, pool=False)
+=======
+def ResNet18(flatten=True, coordconv=False):
+    return ResNet(SimpleBlock, [2, 2, 2, 2], [64, 128, 256, 512], flatten,
+                  coordconv=coordconv)
+>>>>>>> e1e2e3c90090a6be4f1b7028ab84d47c394d2ca1
 
 
 def PretrainedResNet18():

@@ -80,7 +80,7 @@ class TextRep(nn.Module):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, 512)
+        self.gru = nn.GRU(self.embedding_dim, 1024)
 
     def forward(self, seq, length):
         batch_size = seq.size(0)

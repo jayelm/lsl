@@ -27,4 +27,5 @@ python lsl/caption.py --cuda \
     --data_dir $DATA_DIR \
     --batch_size $BATCH_SIZE \
     --seed $RANDOM \
-    exp/cap/"$(basename $DATA_DIR)"_"$BACKBONE""1024"
+    --coordconv \
+    exp/cap/"$(basename $DATA_DIR)"_"$BACKBONE""_cc"
