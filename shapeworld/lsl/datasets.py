@@ -14,7 +14,7 @@ from torchvision import transforms
 from utils import next_random, OrderedCounter
 
 # Set your data directory here!
-DATA_DIR = '/u/scr/muj/shapeworld_4k'
+DATA_DIR = './shapeworld_4k'
 SPLIT_OPTIONS = ['train', 'val', 'test', 'val_same', 'test_same']
 
 logging.getLogger(__name__).setLevel(logging.INFO)
