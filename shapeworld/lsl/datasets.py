@@ -194,11 +194,11 @@ class ShapeWorld(data.Dataset):
 
         self.precomputed_features = precomputed_features
         if self.precomputed_features:
-            in_features_name = 'inputs.feats.npy'
-            ex_features_name = 'examples.feats.npy'
+            in_features_name = 'inputs.feats.npz'
+            ex_features_name = 'examples.feats.npz'
         else:
-            in_features_name = 'inputs.npy'
-            ex_features_name = 'examples.npy'
+            in_features_name = 'inputs.npz'
+            ex_features_name = 'examples.npz'
 
         self.preprocess = None
         if preprocess:
@@ -213,9 +213,9 @@ class ShapeWorld(data.Dataset):
         # examples = images with positive labels (pre-training)
         # input = test time input
         # label = test time label
-        labels = np.load(os.path.join(split_dir, 'labels.npy'))
-        in_features = np.load(os.path.join(split_dir, in_features_name))
-        ex_features = np.load(os.path.join(split_dir, ex_features_name))
+        labels = np.load(os.path.join(split_dir, 'labels.npz'))['arr_0']
+        in_features = np.load(os.path.join(split_dir, in_features_name))['arr_0']
+        ex_features = np.load(os.path.join(split_dir, ex_features_name))['arr_0']
         with open(os.path.join(split_dir, 'hints.json')) as fp:
             hints = json.load(fp)
 
