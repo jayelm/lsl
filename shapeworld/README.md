@@ -31,8 +31,9 @@ The models can be run with the scripts in this directory:
 - `run_meta.sh` - meta-learning baseline
 - `run_lang_ablation.sh` - language ablation studies
 
-They will output results in the `exp/` directory (runs for ViGIL are already
-present there)
+They will output results in the `exp/` directory (paper runs are already present there)
+
+To change the backbone, use `--backbone conv4` or `--backbone ResNet18`. ResNet18 may need reduced batch size (we use batch size 32)
 
 ## Analysis
 
