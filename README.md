@@ -7,7 +7,7 @@ Code and data for
 In addition, a CodaLab executable paper (docker containers with code, data, and experiment runs) is available [here](https://bit.ly/lsl_acl20).
 
 The codebase is split into two repositories, `shapeworld` and `birds`, for the
-diffrent tasks explored in this paper.  Each have their own READMEs,
+different tasks explored in this paper.  Each have their own READMEs,
 instructions, and licenses, since they were extended from different existing
 codebases.
 
