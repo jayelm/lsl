@@ -9,7 +9,7 @@ Tested with Python 3.7.4, torch 1.3.0, torchvision 0.4.1, sklearn 0.21.3, and nu
 ## Data
 
 Download data [here](http://nlp.stanford.edu/data/muj/shapeworld_4k.zip)
-(~850 MB). Unzip, and set `DATA_DIR` in `datasets.py` to be
+(~850 MB). Untar, and set `DATA_DIR` in `datasets.py` to be
 point to the folder *containing* the ShapeWorld folder you just unzipped.
 
 This code works with Jacob Andreas' [original ShapeWorld data
