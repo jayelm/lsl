@@ -550,7 +550,7 @@ class ProtoNet(nn.Module):
         hypo_loss = F.cross_entropy(hypo_nofinal_2d, lang_nostart_2d, reduction="none")
         hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
         # Mask out sequences based on length
-        hypo_loss.masked_fill_(mask_nostart, 0.0)
+        hypo_loss.masked_fill_(mask_nostart.byte(), 0.0)
         # Sum over timesteps / divide by length
         hypo_loss_per_sentence = torch.div(
             hypo_loss.sum(dim=1), (lang_length - 1).float()

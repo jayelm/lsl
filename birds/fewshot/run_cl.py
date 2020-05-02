@@ -105,7 +105,7 @@ if __name__ == "__main__":
         if not args.no_train:
             print("==== RUN_CL ({}/{}): TRAIN ====".format(i, args.n))
             train_cmd = [
-                "python3.7",
+                "python3",
                 "fewshot/train.py",
                 "--model",
                 args.model,
@@ -189,7 +189,7 @@ if __name__ == "__main__":
 
         print("==== RUN_CL ({}/{}): TEST NOVEL ====".format(i, args.n))
         test_cmd = [
-            "python3.7",
+            "python3",
             "fewshot/test.py",
             "--model",
             args.model,

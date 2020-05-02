@@ -18,6 +18,7 @@ from io_utils import get_resume_file, model_dict, parse_args
 from models.language import TextProposal, TextRep
 from models.protonet import ProtoNet
 
+torch.backends.cudnn.enabled = False
 
 def get_optimizer(model, args):
     """

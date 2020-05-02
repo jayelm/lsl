@@ -20,6 +20,7 @@ from io_utils import get_assigned_file, get_best_file, model_dict, parse_args
 from models.language import TextProposal, TextRep
 from models.protonet import ProtoNet
 
+torch.backends.cudnn.enabled = False
 
 if __name__ == "__main__":
     args = parse_args("test")
