@@ -9,15 +9,16 @@ Tested with Python 3.7.4, torch 1.3.0, torchvision 0.4.1, sklearn 0.21.3, and nu
 ## Data
 
 Download data [here](http://nlp.stanford.edu/data/muj/shapeworld_4k.zip)
-(~1GB zipped, 12G unzipped). Unzip, and set `DATA_DIR` in `datasets.py` to be
+(~850 MB). Unzip, and set `DATA_DIR` in `datasets.py` to be
 point to the folder *containing* the ShapeWorld folder you just unzipped.
 
-The code also works with Jacob Andreas' [original ShapeWorld data
-files](http://people.eecs.berkeley.edu/~jda/data/shapeworld.tar.gz); results
-are the same, but with higher variance on test accuracies.
+This code works with Jacob Andreas' [original ShapeWorld data
+files](http://people.eecs.berkeley.edu/~jda/data/shapeworld.tar.gz) if you replace
+every `.npz` file with `.npy` in `datasets.py` and remove the `['arr_0']` indexing after each `np.load`.
+Results are similar, but with higher variance on test accuracies.
 
 For more details on the dataset (and how to reproduce it), check
-[jacoobandreas/l3](https://github.com/jacobandreas/l3) and the accompanying
+[jacobandreas/l3](https://github.com/jacobandreas/l3) and the accompanying
 [paper](https://arxiv.org/abs/1711.00482)
 
 ## Running
