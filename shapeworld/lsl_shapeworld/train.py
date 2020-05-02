@@ -25,6 +25,9 @@ from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 
+
+torch.backends.cudnn.enabled = False  # Conv4 compatibility
+
 TRE_COMP_FNS = {
     'add': AddComp,
     'mul': MulComp,
