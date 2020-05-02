@@ -19,5 +19,5 @@ If you found this code useful, please cite
   title     = {Shaping Visual Representations with Language for Few-Shot Classification},
   booktitle = {Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics},
   year      = {2020}
-  }
+}
 ```
