@@ -6,7 +6,6 @@ Scorer
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import torch.nn.utils.rnn as rnn_utils
 
 
 class Scorer(nn.Module):
