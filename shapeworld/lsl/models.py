@@ -214,7 +214,7 @@ class TextProposal(nn.Module):
         embed_seq = self.embedding(seq)
 
         packed_input = rnn_utils.pack_padded_sequence(embed_seq,
-                                                      sorted_lengths)
+                                                      sorted_lengths.cpu())
 
         # shape = (seq_len, batch, hidden_dim)
         packed_output, _ = self.gru(packed_input, feats)

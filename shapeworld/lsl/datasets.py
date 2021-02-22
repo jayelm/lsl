@@ -14,7 +14,7 @@ from torchvision import transforms
 from utils import next_random, OrderedCounter
 
 # Set your data directory here!
-DATA_DIR = '/u/scr/muj/shapeworld_4k'
+DATA_DIR = '/home/songlin/'
 SPLIT_OPTIONS = ['train', 'val', 'test', 'val_same', 'test_same']
 
 logging.getLogger(__name__).setLevel(logging.INFO)
@@ -489,7 +489,10 @@ class ShapeWorld(data.Dataset):
         support_class_noise = support_class_noise.unsqueeze(0).expand_as(
             support)
         # Instance noise
-        if self.noise_type == 'gaussian':
+        if self.noise == 0:
+            support_instance_noise = torch.zeros(*support.shape, dtype=torch.float)
+            query_instance_noise = torch.zeros(*query.shape, dtype=torch.float)
+        elif self.noise_type == 'gaussian':
             support_instance_noise = torch.FloatTensor(*support.shape).normal_(
                 0, self.noise)
             query_instance_noise = torch.FloatTensor(*query.shape).normal_(
