@@ -687,7 +687,7 @@ if __name__ == "__main__":
         test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)
 
         epoch_acc = (val_acc + val_same_acc) / 2
-        is_best_epoch = epoch_acc > best_val_acc
+        is_best_epoch = epoch_acc > (best_val_acc + best_val_same_acc) / 2
         if is_best_epoch:
             best_epoch = epoch
             best_epoch_acc = epoch_acc
