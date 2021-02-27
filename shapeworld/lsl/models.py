@@ -36,7 +36,7 @@ class ExWrapper(nn.Module):
         if len(x.shape) == 5:
             x_enc = x_enc.view(batch_size, n_ex, -1)
 
-        return x_enc
+        return F.normalize(x_enc)
 
 
 class Identity(nn.Module):
@@ -55,6 +55,7 @@ class ImageRep(nn.Module):
 
     def __init__(self, backbone=None, hidden_size=512):
         super(ImageRep, self).__init__()
+        self.hidden_size = hidden_size
         if backbone is None:
             self.backbone = Identity()
             self.backbone.final_feat_dim = 4608
@@ -62,7 +63,7 @@ class ImageRep(nn.Module):
             self.backbone = backbone
         self.model = nn.Sequential(
             nn.Linear(self.backbone.final_feat_dim, hidden_size), nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size))
+            nn.Linear(hidden_size, hidden_size)) # hidden_size
 
     def forward(self, x):
         x_enc = self.backbone(x)
@@ -76,11 +77,11 @@ class TextRep(nn.Module):
     Again, this uses 512 hidden dimensions.
     """
 
-    def __init__(self, embedding_module):
+    def __init__(self, embedding_module, hidden_size=512):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
-        self.gru = nn.GRU(self.embedding_dim, 512)
+        self.gru = nn.GRU(self.embedding_dim, hidden_size) # 512
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -107,7 +108,7 @@ class TextRep(nn.Module):
             _, reversed_idx = torch.sort(sorted_idx)
             hidden = hidden[reversed_idx]
 
-        return hidden
+        return F.normalize(hidden)
 
 
 class MultimodalDeepRep(nn.Module):
@@ -188,13 +189,14 @@ class TextProposal(nn.Module):
     https://github.com/yunjey/pytorch-tutorial/blob/master/tutorials/03-advanced/image_captioning/model.py
     """
 
-    def __init__(self, embedding_module):
+    def __init__(self, embedding_module, hidden_size=512):
         super(TextProposal, self).__init__()
+        self.hidden_size = hidden_size
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.vocab_size = embedding_module.num_embeddings
-        self.gru = nn.GRU(self.embedding_dim, 512)
-        self.outputs2vocab = nn.Linear(512, self.vocab_size)
+        self.gru = nn.GRU(self.embedding_dim, hidden_size) # 512
+        self.outputs2vocab = nn.Linear(hidden_size, self.vocab_size) # 512
 
     def forward(self, feats, seq, length):
         # feats is from example images
@@ -229,7 +231,7 @@ class TextProposal(nn.Module):
             output = output[reversed_idx]
 
         max_length = output.size(1)
-        output_2d = output.view(batch_size * max_length, 512)
+        output_2d = output.view(batch_size * max_length, self.hidden_size) # 512
         outputs_2d = self.outputs2vocab(output_2d)
         outputs = outputs_2d.view(batch_size, max_length, self.vocab_size)
 

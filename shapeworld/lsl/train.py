@@ -24,6 +24,7 @@ from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
+from retrivers import dot_product, cos_similarity
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -108,6 +109,10 @@ if __name__ == "__main__":
         '--oracle',
         action='store_true',
         help='Use oracle hypotheses for prediction (requires --infer_hyp)')
+    parser.add_argument(
+        '--retrive_hint',
+        action='store_true',
+        help='use the hint of tasks seen during training time (requires --infer_hyp)')
     parser.add_argument('--max_train',
                         type=int,
                         default=None,
@@ -200,6 +205,9 @@ if __name__ == "__main__":
     if args.oracle and not args.infer_hyp:
         parser.error("Must specify --infer_hyp to use --oracle")
 
+    if args.retrive_hint and not args.infer_hyp:
+        parser.error("Must specify --infer_hyp to use --retrive_hint")
+
     if args.multimodal_concept and not args.infer_hyp:
         parser.error("Must specify --infer_hyp to use --multimodal_concept")
 
@@ -214,7 +222,7 @@ if __name__ == "__main__":
     args.encode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'embed')
     args.decode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'generate')
 
-    if args.oracle:
+    if args.oracle or args.retrive_hint: 
         args.n_infer = 1  # No need to repeatedly infer, hint is given
 
     if not os.path.isdir(args.exp_dir):
@@ -359,11 +367,6 @@ if __name__ == "__main__":
 
     if args.multimodal_concept:
         multimodal_model = MultimodalRep()
-        # multimodal_model = MultimodalLinearRep()
-        # multimodal_model = MultimodalWeightedRep()
-        # multimodal_model = MultimodalSingleWeightRep()
-        # multimodal_model = MultimodalDeepRep()
-        # multimodal_model = MultimodalSumExp()
         multimodal_model = multimodal_model.to(device)
         params_to_optimize.extend(multimodal_model.parameters())
 
@@ -374,7 +377,7 @@ if __name__ == "__main__":
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
 
-    def train(epoch, n_steps=100):
+    def train(epoch, n_steps=100, hint_rep_dict=None):
         image_model.train()
         scorer_model.train()
         if args.decode_hyp:
@@ -415,6 +418,11 @@ if __name__ == "__main__":
                 # Use hypothesis to compute prediction loss
                 # (how well does true hint match image repr)?
                 hint_rep = hint_model(hint_seq, hint_length)
+                
+                # storing seen concepts' hint representations
+                hint_rep_dict[0] = torch.cat((hint_rep_dict[0], examples_rep_mean), dim=0)
+                hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint_rep), dim=0)
+                
                 if args.multimodal_concept:
                     hint_rep = multimodal_model(hint_rep, examples_rep_mean)
 
@@ -492,7 +500,7 @@ if __name__ == "__main__":
 
         return loss_total
 
-    def test(epoch, split='train'):
+    def test(epoch, split='train', hint_rep_dict=None):
         image_model.eval()
         scorer_model.eval()
         if args.infer_hyp:
@@ -520,6 +528,12 @@ if __name__ == "__main__":
                     examples_rep = image_model(examples)
                     examples_rep_mean = torch.mean(examples_rep, dim=1)
 
+                if args.retrive_hint:
+                    # retrive the hint representation of the closest concept
+                    closest_neighbor_idx = torch.argmax(examples_rep_mean @ hint_rep_dict[0].T, dim=1)
+                    closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
+                    hint_rep = hint_rep_dict[1][closest_neighbor_idx]
+                
                 if args.poe:
                     # Compute support image -> query image scores
                     image_score = scorer_model.score(examples_rep_mean,
@@ -536,16 +550,19 @@ if __name__ == "__main__":
                     for j in range(args.n_infer):
                         # Decode greedily for first hyp; otherwise sample
                         # If --oracle, hint_seq/hint_length is given
-                        if not args.oracle:
+                        if not args.oracle and not args.retrive_hint:
                             hint_seq, hint_length = proposal_model.sample(
                                 examples_rep_mean,
                                 sos_index,
                                 eos_index,
                                 pad_index,
                                 greedy=j == 0)
-                        hint_seq = hint_seq.to(device)
-                        hint_length = hint_length.to(device)
-                        hint_rep = hint_model(hint_seq, hint_length)
+                        
+                        # Directly used seen representations if using retrive_hint mode
+                        if not args.retrive_hint: 
+                            hint_seq = hint_seq.to(device)
+                            hint_length = hint_length.to(device)
+                            hint_rep = hint_model(hint_seq, hint_length)
 
                         # Compute how well this hint describes the 4 concepts.
                         if not args.oracle:
@@ -566,7 +583,7 @@ if __name__ == "__main__":
                         label_hat = label_hat.cpu().numpy()
 
                         # Update scores and predictions for best running hints
-                        if not args.oracle:
+                        if not args.oracle and not args.retrive_hint:
                             updates = hint_scores > best_hint_scores
                             best_hint_scores = np.where(
                                 updates, hint_scores, best_hint_scores)
@@ -665,17 +682,18 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch)
-        train_acc, _ = test(epoch, 'train')
-        val_acc, _ = test(epoch, 'val')
+        hint_rep_dict = [torch.empty(1, image_model.model.hidden_size).cuda(), torch.empty(1, proposal_model.hidden_size).cuda()]
+        train_loss = train(epoch, hint_rep_dict=hint_rep_dict)
+        train_acc, _ = test(epoch, 'train', hint_rep_dict)
+        val_acc, _ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
         #  val_tre, val_tre_std = eval_tre(epoch, 'val')
         val_tre, val_tre_std = 0.0, 0.0
 
-        test_acc, test_raw_scores = test(epoch, 'test')
+        test_acc, test_raw_scores = test(epoch, 'test', hint_rep_dict)
         if has_same:
-            val_same_acc, _ = test(epoch, 'val_same')
-            test_same_acc, test_same_raw_scores = test(epoch, 'test_same')
+            val_same_acc, _ = test(epoch, 'val_same', hint_rep_dict)
+            test_same_acc, test_same_raw_scores = test(epoch, 'test_same', hint_rep_dict)
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
