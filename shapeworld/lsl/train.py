@@ -24,7 +24,7 @@ from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
-from retrivers import dot_product, cos_similarity
+from retrivers import dot_product, cos_similarity, l2_distance
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -420,8 +420,13 @@ if __name__ == "__main__":
                 hint_rep = hint_model(hint_seq, hint_length)
                 
                 # storing seen concepts' hint representations
-                hint_rep_dict[0] = torch.cat((hint_rep_dict[0], examples_rep_mean), dim=0)
-                hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint_rep), dim=0)
+                if args.retrive_hint:
+                    if len(hint_rep_dict) == 0:
+                        hint_rep_dict.extend([examples_rep_mean, hint_rep, hint_seq])
+                    else:
+                        hint_rep_dict[0] = torch.cat((hint_rep_dict[0], examples_rep_mean), dim=0)
+                        hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint_rep), dim=0)
+                        hint_rep_dict[2] = torch.cat((hint_rep_dict[2], hint_seq), dim=0)
                 
                 if args.multimodal_concept:
                     hint_rep = multimodal_model(hint_rep, examples_rep_mean)
@@ -511,6 +516,7 @@ if __name__ == "__main__":
                 multimodal_model.eval()
 
         accuracy_meter = AverageMeter(raw=True)
+        retrival_acc_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -530,10 +536,16 @@ if __name__ == "__main__":
 
                 if args.retrive_hint:
                     # retrive the hint representation of the closest concept
-                    closest_neighbor_idx = torch.argmax(examples_rep_mean @ hint_rep_dict[0].T, dim=1)
-                    closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
+                    # closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
+                    # closest_neighbor_idx = l2_distance(examples_rep_mean, hint_rep_dict[0]) 
+                    closest_neighbor_idx = dot_product(examples_rep_mean, hint_rep_dict[0])
                     hint_rep = hint_rep_dict[1][closest_neighbor_idx]
-                
+
+                    # calculating retrival accuracy
+                    raw_scores = torch.eq(hint_rep_dict[2][closest_neighbor_idx], hint_seq.cuda())
+                    retrival_acc = torch.mean(torch.prod(raw_scores.float(), dim=1))
+                    retrival_acc_meter.update(retrival_acc, batch_size, raw_scores=(raw_scores))
+
                 if args.poe:
                     # Compute support image -> query image scores
                     image_score = scorer_model.score(examples_rep_mean,
@@ -605,8 +617,8 @@ if __name__ == "__main__":
                                       batch_size,
                                       raw_scores=(label_hat == label_np))
 
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
-            '({})'.format(split), epoch, accuracy_meter.avg))
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, accuracy_meter.avg, retrival_acc_meter.avg))
 
         return accuracy_meter.avg, accuracy_meter.raw_scores
 
@@ -682,7 +694,7 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        hint_rep_dict = [torch.empty(1, image_model.model.hidden_size).cuda(), torch.empty(1, proposal_model.hidden_size).cuda()]
+        hint_rep_dict = []
         train_loss = train(epoch, hint_rep_dict=hint_rep_dict)
         train_acc, _ = test(epoch, 'train', hint_rep_dict)
         val_acc, _ = test(epoch, 'val', hint_rep_dict)
