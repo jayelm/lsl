@@ -24,7 +24,7 @@ from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
-from retrivers import dot_product, cos_similarity, l2_distance
+from retrivers import construct_dict, dot_product, cos_similarity, l2_distance
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -377,7 +377,7 @@ if __name__ == "__main__":
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
 
-    def train(epoch, n_steps=100, hint_rep_dict=None):
+    def train(epoch, n_steps=100):
         image_model.train()
         scorer_model.train()
         if args.decode_hyp:
@@ -418,15 +418,6 @@ if __name__ == "__main__":
                 # Use hypothesis to compute prediction loss
                 # (how well does true hint match image repr)?
                 hint_rep = hint_model(hint_seq, hint_length)
-                
-                # storing seen concepts' hint representations
-                if args.retrive_hint:
-                    if len(hint_rep_dict) == 0:
-                        hint_rep_dict.extend([examples_rep_mean, hint_rep, hint_seq])
-                    else:
-                        hint_rep_dict[0] = torch.cat((hint_rep_dict[0], examples_rep_mean), dim=0)
-                        hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint_rep), dim=0)
-                        hint_rep_dict[2] = torch.cat((hint_rep_dict[2], hint_seq), dim=0)
                 
                 if args.multimodal_concept:
                     hint_rep = multimodal_model(hint_rep, examples_rep_mean)
@@ -519,6 +510,8 @@ if __name__ == "__main__":
         retrival_acc_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
 
+        if split == 'train':
+            print(data_loader.dataset.augment)
         with torch.no_grad():
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
                 examples = examples.to(device)
@@ -536,14 +529,17 @@ if __name__ == "__main__":
 
                 if args.retrive_hint:
                     # retrive the hint representation of the closest concept
-                    # closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
+                    closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
                     # closest_neighbor_idx = l2_distance(examples_rep_mean, hint_rep_dict[0]) 
-                    closest_neighbor_idx = dot_product(examples_rep_mean, hint_rep_dict[0])
+                    # closest_neighbor_idx = dot_product(examples_rep_mean, hint_rep_dict[0])
                     hint_rep = hint_rep_dict[1][closest_neighbor_idx]
 
                     # calculating retrival accuracy
-                    raw_scores = torch.eq(hint_rep_dict[2][closest_neighbor_idx], hint_seq.cuda())
-                    retrival_acc = torch.mean(torch.prod(raw_scores.float(), dim=1))
+                    raw_scores = torch.prod(torch.eq(hint_rep_dict[2][closest_neighbor_idx], hint_seq.cuda()).float(), dim=1)
+                    retrival_acc = torch.mean(raw_scores)
+                    # if split == 'train' and retrival_acc != 1:
+                    #     print(label[torch.where(raw_scores == 0)])
+                    #     print(hint_seq[torch.where(raw_scores == 0)])
                     retrival_acc_meter.update(retrival_acc, batch_size, raw_scores=(raw_scores))
 
                 if args.poe:
@@ -694,8 +690,13 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     for epoch in range(1, args.epochs + 1):
-        hint_rep_dict = []
-        train_loss = train(epoch, hint_rep_dict=hint_rep_dict)
+        # train_loss = train(epoch)
+        
+        hint_rep_dict = None
+        # storing seen concepts' hint representations
+        if args.retrive_hint:
+            hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
+
         train_acc, _ = test(epoch, 'train', hint_rep_dict)
         val_acc, _ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
@@ -767,8 +768,8 @@ if __name__ == "__main__":
         '(best_val)', best_epoch, best_val_acc))
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_val_same)', best_epoch, best_val_same_acc))
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_test)', best_epoch, best_test_acc))
+    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}\tCI: {:.4f}'.format(
+        '(best_test)', best_epoch, best_test_acc, best_test_acc_ci))
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_test_same)', best_epoch, best_test_same_acc))
     print('====>')

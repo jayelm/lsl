@@ -5,4 +5,5 @@ CUDA_VISIBLE_DEVICES=0 python -u lsl/train.py --cuda \
     --hypo_lambda 1.0 \
     --batch_size 100 \
     --seed $RANDOM \
-    exp/l3/dot_prod
+    exp/l3/debug
+#    --oracle \

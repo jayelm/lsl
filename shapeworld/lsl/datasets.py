@@ -540,7 +540,7 @@ class ShapeWorld(data.Dataset):
                 examples2, image2, _, support_hint2, support_hint_length2, query_hint2, query_hint_length2 = self.data[
                     random.randint(n_train)]
 
-                # pick either an example or an image.
+                # pick either an example or an image as the query image for negative samples.
                 swap = random.randint(N_EX + 1)
                 if swap == N_EX:
                     feats = image2
@@ -584,10 +584,12 @@ class ShapeWorld(data.Dataset):
                 if swap == N_EX:
                     feats = image
                 else:
+                    # if we need to swap image with one of examples
                     feats = examples[swap, ...]
                     if label == 1:
                         examples[swap, ...] = image
                     else:
+                        # duplicate an image from examples if image and examples belong to different concepts
                         examples[swap, ...] = examples[random.randint(N_EX
                                                                       ), ...]
 
