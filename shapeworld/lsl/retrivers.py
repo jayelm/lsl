@@ -4,11 +4,13 @@ def construct_dict(dataloader, image_model=None, hint_model=None, multimodal_mod
     hint_rep_dict = []
     image_model.eval()
     hint_model.eval()
-    aug = dataloader.dataset.augment
-    dataloader.dataset.augment = False
-
-    for examples, image, label, hint, hint_length, *rest in dataloader:
-
+    
+    #for examples, image, label, hint, hint_length, *rest in dataloader:
+    for index in range(len(dataloader)):
+        examples, image, label, hint, hint_length, test_hint, test_hint_length = \
+            dataloader.__getitem__(index)
+        hint_length = torch.tensor([hint_length])
+        examples, hint = torch.unsqueeze(examples,0), torch.unsqueeze(hint,0) 
         hint = hint.cuda()
         hint_rep = hint_model(hint, hint_length)
         examples_rep_mean = torch.mean(image_model(examples.cuda()), dim=1)
@@ -20,14 +22,12 @@ def construct_dict(dataloader, image_model=None, hint_model=None, multimodal_mod
             hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint_rep), dim=0)
             hint_rep_dict[2] = torch.cat((hint_rep_dict[2], hint), dim=0)
 
-    dataloader.dataset.augment = aug
-    print(dataloader.dataset.augment)
     return hint_rep_dict
 
 def dot_product(query, key):
     return torch.argmax(query @ key.T, dim=1)
 
-def l2_distance(query, key): 
+def l2_distance(query, key):
     return torch.argmin(torch.cdist(query, key, 2), dim=1)
 
 def cos_similarity(query, key):

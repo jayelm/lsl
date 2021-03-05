@@ -253,6 +253,22 @@ if __name__ == "__main__":
         language_filter=args.language_filter,
         shuffle_words=args.shuffle_words,
         shuffle_captions=args.shuffle_captions)
+    dummpy_train = ShapeWorld(
+        split='train',
+        vocab=None,
+        augment=False,
+        precomputed_features=precomputed_features,
+        max_size=args.max_train,
+        preprocess=preprocess,
+        noise=args.noise,
+        class_noise_weight=args.class_noise_weight,
+        fixed_noise_colors=args.fixed_noise_colors,
+        fixed_noise_colors_max_rgb=args.fixed_noise_colors_max_rgb,
+        noise_type=args.noise_type,
+        data_dir=args.data_dir,
+        language_filter=args.language_filter,
+        shuffle_words=args.shuffle_words,
+        shuffle_captions=args.shuffle_captions)
     train_vocab = train_dataset.vocab
     train_vocab_size = train_dataset.vocab_size
     train_max_length = train_dataset.max_length
@@ -510,9 +526,8 @@ if __name__ == "__main__":
         retrival_acc_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
 
-        if split == 'train':
-            print(data_loader.dataset.augment)
         with torch.no_grad():
+            r_accs = []
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
                 examples = examples.to(device)
                 image = image.to(device)
@@ -529,17 +544,14 @@ if __name__ == "__main__":
 
                 if args.retrive_hint:
                     # retrive the hint representation of the closest concept
-                    closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
-                    # closest_neighbor_idx = l2_distance(examples_rep_mean, hint_rep_dict[0]) 
+                    # closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
+                    closest_neighbor_idx = l2_distance(examples_rep_mean, hint_rep_dict[0]) 
                     # closest_neighbor_idx = dot_product(examples_rep_mean, hint_rep_dict[0])
                     hint_rep = hint_rep_dict[1][closest_neighbor_idx]
 
                     # calculating retrival accuracy
                     raw_scores = torch.prod(torch.eq(hint_rep_dict[2][closest_neighbor_idx], hint_seq.cuda()).float(), dim=1)
                     retrival_acc = torch.mean(raw_scores)
-                    # if split == 'train' and retrival_acc != 1:
-                    #     print(label[torch.where(raw_scores == 0)])
-                    #     print(hint_seq[torch.where(raw_scores == 0)])
                     retrival_acc_meter.update(retrival_acc, batch_size, raw_scores=(raw_scores))
 
                 if args.poe:
@@ -689,14 +701,12 @@ if __name__ == "__main__":
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
+    hint_rep_dict = None
     for epoch in range(1, args.epochs + 1):
         # train_loss = train(epoch)
-        
-        hint_rep_dict = None
         # storing seen concepts' hint representations
         if args.retrive_hint:
-            hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
-
+            hint_rep_dict = construct_dict(dummpy_train, image_model, hint_model)
         train_acc, _ = test(epoch, 'train', hint_rep_dict)
         val_acc, _ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
