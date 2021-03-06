@@ -344,8 +344,6 @@ class ShapeWorld(data.Dataset):
         self.data = data
         self.max_length = max_length
 
-        self.num_augs = 0
-        self.test_set = set()
 
     def create_vocab(self, hints, test_hints):
         w2i = dict()
@@ -530,7 +528,7 @@ class ShapeWorld(data.Dataset):
             # tie a language to a concept; convert to pytorch.
             hint = torch.from_numpy(hint).long()
             test_hint = torch.from_numpy(test_hint).long()
-            examples = torch.clone(torch.from_numpy(examples))
+            examples = torch.clone(torch.from_numpy(examples)).float()
 
             # in training, pick whether to show positive or negative example.
             sample_label = random.randint(2)
@@ -560,8 +558,6 @@ class ShapeWorld(data.Dataset):
                 test_hint = torch.from_numpy(test_hint).long()
 
                 feats = torch.from_numpy(feats).float()
-                # examples = torch.clone(torch.from_numpy(examples)).float()
-                examples = examples.float()
                 # this is a 0 since feats does not match this hint.
                 if self.fixed_noise_colors is not None:
                     examples, feats = self.add_fixed_noise_colors(
@@ -595,7 +591,6 @@ class ShapeWorld(data.Dataset):
                     if label == 1:
                         examples[swap, ...] = image
                     else:
-                        self.num_augs += 1
                         # duplicate an image from examples if image and examples belong to different concepts
                         examples[swap, ...] = examples[random.randint(N_EX
                                                                       ), ...]
@@ -606,9 +601,6 @@ class ShapeWorld(data.Dataset):
                 test_hint_length = hint_length
 
                 feats = feats.float()
-                # feats = torch.from_numpy(feats).float()
-                examples = examples.float()
-                # examples = torch.from_numpy(examples).float()
 
                 if self.fixed_noise_colors is not None:
                     examples, feats = self.add_fixed_noise_colors(
@@ -641,7 +633,6 @@ class ShapeWorld(data.Dataset):
             hint = torch.from_numpy(hint).long()
             test_hint = torch.from_numpy(test_hint).long()
             examples = torch.from_numpy(examples).float()
-            old_examples = torch.clone(examples)
 
             # this is a 0 since feats does not match this hint.
             if self.fixed_noise_colors is not None:
@@ -658,7 +649,7 @@ class ShapeWorld(data.Dataset):
             if self.preprocess is not None:
                 image = self.preprocess(image)
                 examples = torch.stack([self.preprocess(e) for e in examples])
-            self.test_set.add(torch.equal(examples, old_examples))
+
             return examples, image, label, hint, hint_length, test_hint, test_hint_length
 
     def to_text(self, hints):

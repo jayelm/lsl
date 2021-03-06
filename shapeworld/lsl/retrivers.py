@@ -5,14 +5,8 @@ def construct_dict(dataloader, image_model=None, hint_model=None, multimodal_mod
     image_model.eval()
     hint_model.eval()
 
-    print("In construct, aug is ? " + str(dataloader.augment))
     ex = []
-    # for examples, image, label, hint, hint_length, *rest in dataloader:
-    for index in range(len(dataloader)):
-        examples, image, label, hint, hint_length, test_hint, test_hint_length = \
-            dataloader.__getitem__(index)
-        hint_length = torch.tensor([hint_length])
-        examples, hint = torch.unsqueeze(examples,0), torch.unsqueeze(hint,0) 
+    for examples, image, label, hint, hint_length, *rest in dataloader:
         ex.append(examples)
         hint = hint.cuda()
         hint_rep = hint_model(hint, hint_length)
