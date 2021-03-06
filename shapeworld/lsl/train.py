@@ -687,14 +687,14 @@ if __name__ == "__main__":
     hint_rep_dict = None
     import copy
     for epoch in range(1, args.epochs + 1):
-        # train_loss = train(epoch)
+        train_loss = train(epoch)
 
         # storing seen concepts' hint representations
         if args.retrive_hint:
             train_dataset.augment = False # this is not gonna work if there are multiple workers
             hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
             train_dataset.augment = True
-            
+
         train_acc, _ = test(epoch, 'train', hint_rep_dict)
         val_acc, _ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
