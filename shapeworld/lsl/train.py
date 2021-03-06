@@ -319,7 +319,6 @@ if __name__ == "__main__":
         has_same = True
     except RuntimeError:
         has_same = False
-
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=False)
@@ -702,12 +701,34 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     hint_rep_dict = None
+    import copy
     for epoch in range(1, args.epochs + 1):
         # train_loss = train(epoch)
+        train_dataset.num_augs = 0
+        old_dict = None
+        if hint_rep_dict is not None:
+            old_dict = (torch.clone(hint_rep_dict[0]), torch.clone(hint_rep_dict[1]), torch.clone(hint_rep_dict[2]))
+
         # storing seen concepts' hint representations
         if args.retrive_hint:
-            hint_rep_dict = construct_dict(dummpy_train, image_model, hint_model)
+            train_dataset.augment = False
+            print("aug is ? " + str(train_dataset.augment))            
+            hint_rep_dict = construct_dict(train_dataset, image_model, hint_model)
+            train_dataset.augment = True
+            print("no change in getitem ? " + str(all(train_dataset.test_set)))
+            # print("total num of train augs is " + str(train_dataset.num_augs))
+            # print("train augs percentage is " + str(train_dataset.num_augs / len(train_dataset)))
+        if old_dict is not None:
+            sorted_1, _ = torch.sort(old_dict[0], dim=0)
+            sorted_2, _ = torch.sort(hint_rep_dict[0], dim=0)
+            print("ths sum of the old dict is " + str(torch.sum(sorted_1).item()))
+            print("ths sum of the new dict is " + str(torch.sum(sorted_2).item()))
+            print("dict is equal ? " + str(torch.equal(sorted_1, sorted_2)))
+
         train_acc, _ = test(epoch, 'train', hint_rep_dict)
+        # print("total num of augs is " + str(train_dataset.num_augs))
+        # print("augs percentage is " + str(train_dataset.num_augs / len(train_dataset)))
+        train_dataset.num_augs = 0
         val_acc, _ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
         #  val_tre, val_tre_std = eval_tre(epoch, 'val')
