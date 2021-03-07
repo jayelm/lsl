@@ -218,7 +218,7 @@ class TextProposal(nn.Module):
         packed_input = rnn_utils.pack_padded_sequence(embed_seq,
                                                       sorted_lengths.cpu())
 
-        # shape = (seq_len, batch, hidden_dim)
+        # shape = (seq_len, batch, hidden_dim) Visual features are used to initialize GRUs
         packed_output, _ = self.gru(packed_input, feats)
         output = rnn_utils.pad_packed_sequence(packed_output)
         output = output[0].contiguous()

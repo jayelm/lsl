@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
 from sklearn.metrics import accuracy_score
+from torchtext.data.metrics import bleu_score
 
 import torch
 import torch.nn as nn
@@ -16,6 +17,7 @@ from torch import optim
 from utils import (
     AverageMeter,
     save_defaultdict_to_fs,
+    idx2word,
 )
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
@@ -335,7 +337,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model))
+    image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512))
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -355,12 +357,12 @@ if __name__ == "__main__":
         embedding_model = nn.Embedding(train_vocab_size, 512)
 
     if args.decode_hyp:
-        proposal_model = TextProposal(embedding_model)
+        proposal_model = TextProposal(embedding_model, hidden_size=512)
         proposal_model = proposal_model.to(device)
         params_to_optimize.extend(proposal_model.parameters())
 
     if args.encode_hyp:
-        hint_model = TextRep(embedding_model)
+        hint_model = TextRep(embedding_model, hidden_size=512)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
 
@@ -507,6 +509,7 @@ if __name__ == "__main__":
 
         accuracy_meter = AverageMeter(raw=True)
         retrival_acc_meter = AverageMeter(raw=True)
+        bleu_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -530,10 +533,9 @@ if __name__ == "__main__":
                     # closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
                     closest_neighbor_idx = l2_distance(examples_rep_mean, hint_rep_dict[0]) 
                     # closest_neighbor_idx = dot_product(examples_rep_mean, hint_rep_dict[0])
-                    hint_rep = hint_rep_dict[1][closest_neighbor_idx]
 
                     # calculating retrival accuracy
-                    raw_scores = torch.prod(torch.eq(hint_rep_dict[2][closest_neighbor_idx], hint_seq.cuda()).float(), dim=1)
+                    raw_scores = torch.prod(torch.eq(hint_rep_dict[1][closest_neighbor_idx], hint_seq.cuda()).float(), dim=1)
                     retrival_acc = torch.mean(raw_scores)
                     retrival_acc_meter.update(retrival_acc, batch_size, raw_scores=(raw_scores))
 
@@ -550,22 +552,26 @@ if __name__ == "__main__":
                                                -np.inf,
                                                dtype=np.float32)
 
+                    support_hint = hint_seq
                     for j in range(args.n_infer):
                         # Decode greedily for first hyp; otherwise sample
                         # If --oracle, hint_seq/hint_length is given
-                        if not args.oracle and not args.retrive_hint:
+                        if args.retrive_hint:
+                            hint_seq = hint_rep_dict[1][closest_neighbor_idx]
+                        elif not args.oracle:
                             hint_seq, hint_length = proposal_model.sample(
                                 examples_rep_mean,
                                 sos_index,
                                 eos_index,
                                 pad_index,
                                 greedy=j == 0)
+                        else:
+                            raise RuntimeError("Should not reach here")
                         
-                        # Directly used seen representations if using retrive_hint mode
-                        if not args.retrive_hint: 
-                            hint_seq = hint_seq.to(device)
-                            hint_length = hint_length.to(device)
-                            hint_rep = hint_model(hint_seq, hint_length)
+                        # Only generate hint if not using retrieval 
+                        hint_seq = hint_seq.to(device)
+                        hint_length = hint_length.to(device)
+                        hint_rep = hint_model(hint_seq, hint_length)
 
                         # Compute how well this hint describes the 4 concepts.
                         if not args.oracle:
@@ -594,7 +600,9 @@ if __name__ == "__main__":
                                 updates, label_hat, best_predictions)
                         else:
                             best_predictions = label_hat
-
+                    hint_seq = idx2word(hint_seq, data_loader.dataset.i2w, remove_pad=True)
+                    support_hint = idx2word(support_hint, data_loader.dataset.i2w, remove_pad=True, target=True)
+                    bleu = bleu_score(hint_seq, support_hint)
                     accuracy = accuracy_score(label_np, best_predictions)
                 else:
                     # Compare image directly to example rep
@@ -607,9 +615,10 @@ if __name__ == "__main__":
                 accuracy_meter.update(accuracy,
                                       batch_size,
                                       raw_scores=(label_hat == label_np))
+                bleu_meter.update(bleu, batch_size, raw_scores=[bleu])
 
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
-            '({})'.format(split), epoch, accuracy_meter.avg, retrival_acc_meter.avg))
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tBLEU Score: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, accuracy_meter.avg, bleu_meter.avg, retrival_acc_meter.avg))
 
         return accuracy_meter.avg, accuracy_meter.raw_scores
 
@@ -685,7 +694,6 @@ if __name__ == "__main__":
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     hint_rep_dict = None
-    import copy
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch)
 

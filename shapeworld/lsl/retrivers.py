@@ -5,23 +5,16 @@ def construct_dict(dataloader, image_model=None, hint_model=None, multimodal_mod
     image_model.eval()
     hint_model.eval()
 
-    ex = []
     for examples, image, label, hint, hint_length, *rest in dataloader:
-        ex.append(examples)
         hint = hint.cuda()
-        hint_rep = hint_model(hint, hint_length)
         examples_rep_mean = torch.mean(image_model(examples.cuda()), dim=1)
         
         if len(hint_rep_dict) == 0:
-            hint_rep_dict.extend([examples_rep_mean, hint_rep, hint])
+            hint_rep_dict.extend([examples_rep_mean, hint])
         else:
             hint_rep_dict[0] = torch.cat((hint_rep_dict[0], examples_rep_mean), dim=0)
-            hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint_rep), dim=0)
-            hint_rep_dict[2] = torch.cat((hint_rep_dict[2], hint), dim=0)
+            hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint), dim=0)
     
-    ex = torch.stack(ex)
-    print("The total sum of visual examples is " + str(torch.sum(ex).item()))
-
     return hint_rep_dict
 
 def dot_product(query, key):
