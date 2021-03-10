@@ -86,11 +86,23 @@ def save_defaultdict_to_fs(d, out_path):
         fp.write(d_str)
 
 
-def idx2word(idx, i2w):
-    sent_str = [str()] * len(idx)
+def idx2word(idx, i2w, remove_pad=False, pad_index=0, target=False):
+    sent_str = []
     for i, sent in enumerate(idx):
-        for word_id in sent:
-            sent_str[i] += str(i2w[word_id.item()]) + " "
-        sent_str[i] = sent_str[i].strip()
+        
+        # Since a generated sequences can be compared with multiple targets
+        # to calculate BLEU scores. If the sequence is a target, a nested 
+        # list is required.
 
+        if target:
+            sent_str.append([[]])
+        else:
+            sent_str.append([])
+        
+        for word_id in sent:
+            if (remove_pad and word_id) or not remove_pad:
+                if target:
+                    sent_str[i][0].append(str(i2w[word_id.item()]))
+                else:
+                    sent_str[i].append(str(i2w[word_id.item()]))
     return sent_str

@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
 from sklearn.metrics import accuracy_score
+from torchtext.data.metrics import bleu_score
 
 import torch
 import torch.nn as nn
@@ -16,6 +17,7 @@ from torch import optim
 from utils import (
     AverageMeter,
     save_defaultdict_to_fs,
+    idx2word,
 )
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
@@ -24,6 +26,7 @@ from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
+from retrivers import construct_dict, dot_product, cos_similarity, l2_distance
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -108,6 +111,10 @@ if __name__ == "__main__":
         '--oracle',
         action='store_true',
         help='Use oracle hypotheses for prediction (requires --infer_hyp)')
+    parser.add_argument(
+        '--retrive_hint',
+        action='store_true',
+        help='use the hint of tasks seen during training time (requires --infer_hyp)')
     parser.add_argument('--max_train',
                         type=int,
                         default=None,
@@ -200,6 +207,9 @@ if __name__ == "__main__":
     if args.oracle and not args.infer_hyp:
         parser.error("Must specify --infer_hyp to use --oracle")
 
+    if args.retrive_hint and not args.infer_hyp:
+        parser.error("Must specify --infer_hyp to use --retrive_hint")
+
     if args.multimodal_concept and not args.infer_hyp:
         parser.error("Must specify --infer_hyp to use --multimodal_concept")
 
@@ -214,7 +224,7 @@ if __name__ == "__main__":
     args.encode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'embed')
     args.decode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'generate')
 
-    if args.oracle:
+    if args.oracle or args.retrive_hint: 
         args.n_infer = 1  # No need to repeatedly infer, hint is given
 
     if not os.path.isdir(args.exp_dir):
@@ -295,7 +305,6 @@ if __name__ == "__main__":
         has_same = True
     except RuntimeError:
         has_same = False
-
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=False)
@@ -328,7 +337,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model))
+    image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512))
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -348,22 +357,17 @@ if __name__ == "__main__":
         embedding_model = nn.Embedding(train_vocab_size, 512)
 
     if args.decode_hyp:
-        proposal_model = TextProposal(embedding_model)
+        proposal_model = TextProposal(embedding_model, hidden_size=512)
         proposal_model = proposal_model.to(device)
         params_to_optimize.extend(proposal_model.parameters())
 
     if args.encode_hyp:
-        hint_model = TextRep(embedding_model)
+        hint_model = TextRep(embedding_model, hidden_size=512)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
 
     if args.multimodal_concept:
         multimodal_model = MultimodalRep()
-        # multimodal_model = MultimodalLinearRep()
-        # multimodal_model = MultimodalWeightedRep()
-        # multimodal_model = MultimodalSingleWeightRep()
-        # multimodal_model = MultimodalDeepRep()
-        # multimodal_model = MultimodalSumExp()
         multimodal_model = multimodal_model.to(device)
         params_to_optimize.extend(multimodal_model.parameters())
 
@@ -492,7 +496,7 @@ if __name__ == "__main__":
 
         return loss_total
 
-    def test(epoch, split='train'):
+    def test(epoch, split='train', hint_rep_dict=None):
         image_model.eval()
         scorer_model.eval()
         if args.infer_hyp:
@@ -503,6 +507,8 @@ if __name__ == "__main__":
                 multimodal_model.eval()
 
         accuracy_meter = AverageMeter(raw=True)
+        retrival_acc_meter = AverageMeter(raw=True)
+        bleu_meter = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -520,6 +526,17 @@ if __name__ == "__main__":
                     examples_rep = image_model(examples)
                     examples_rep_mean = torch.mean(examples_rep, dim=1)
 
+                if args.retrive_hint:
+                    # retrive the hint representation of the closest concept
+                    # closest_neighbor_idx = cos_similarity(examples_rep_mean, hint_rep_dict[0])
+                    closest_neighbor_idx = l2_distance(examples_rep_mean, hint_rep_dict[0]) 
+                    # closest_neighbor_idx = dot_product(examples_rep_mean, hint_rep_dict[0])
+
+                    # calculating retrival accuracy
+                    raw_scores = torch.prod(torch.eq(hint_rep_dict[1][closest_neighbor_idx], hint_seq.cuda()).float(), dim=1)
+                    retrival_acc = torch.mean(raw_scores)
+                    retrival_acc_meter.update(retrival_acc, batch_size, raw_scores=(raw_scores))
+
                 if args.poe:
                     # Compute support image -> query image scores
                     image_score = scorer_model.score(examples_rep_mean,
@@ -533,16 +550,26 @@ if __name__ == "__main__":
                                                -np.inf,
                                                dtype=np.float32)
 
+                    support_hint = hint_seq
                     for j in range(args.n_infer):
                         # Decode greedily for first hyp; otherwise sample
                         # If --oracle, hint_seq/hint_length is given
-                        if not args.oracle:
+                        if args.retrive_hint:
+                            hint_seq = hint_rep_dict[1][closest_neighbor_idx]
+                            hint_length = hint_rep_dict[2][closest_neighbor_idx]
+                        elif not args.oracle:
                             hint_seq, hint_length = proposal_model.sample(
                                 examples_rep_mean,
                                 sos_index,
                                 eos_index,
                                 pad_index,
                                 greedy=j == 0)
+                        elif args.oracle:
+                            pass
+                        else:
+                            raise RuntimeError("Should not reach here")
+                        
+                        # Only generate hint if not using retrieval 
                         hint_seq = hint_seq.to(device)
                         hint_length = hint_length.to(device)
                         hint_rep = hint_model(hint_seq, hint_length)
@@ -566,7 +593,7 @@ if __name__ == "__main__":
                         label_hat = label_hat.cpu().numpy()
 
                         # Update scores and predictions for best running hints
-                        if not args.oracle:
+                        if not args.oracle and not args.retrive_hint:
                             updates = hint_scores > best_hint_scores
                             best_hint_scores = np.where(
                                 updates, hint_scores, best_hint_scores)
@@ -574,7 +601,9 @@ if __name__ == "__main__":
                                 updates, label_hat, best_predictions)
                         else:
                             best_predictions = label_hat
-
+                    hint_seq = idx2word(hint_seq, data_loader.dataset.i2w, remove_pad=True)
+                    support_hint = idx2word(support_hint, data_loader.dataset.i2w, remove_pad=True, target=True)
+                    bleu = bleu_score(hint_seq, support_hint)
                     accuracy = accuracy_score(label_np, best_predictions)
                 else:
                     # Compare image directly to example rep
@@ -587,9 +616,10 @@ if __name__ == "__main__":
                 accuracy_meter.update(accuracy,
                                       batch_size,
                                       raw_scores=(label_hat == label_np))
+                bleu_meter.update(bleu, batch_size, raw_scores=[bleu])
 
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}'.format(
-            '({})'.format(split), epoch, accuracy_meter.avg))
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tBLEU Score: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, accuracy_meter.avg, bleu_meter.avg, retrival_acc_meter.avg))
 
         return accuracy_meter.avg, accuracy_meter.raw_scores
 
@@ -664,18 +694,25 @@ if __name__ == "__main__":
     metrics = defaultdict(lambda: [])
 
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
+    hint_rep_dict = None
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch)
-        train_acc, _ = test(epoch, 'train')
-        val_acc, _ = test(epoch, 'val')
+
+        # storing seen concepts' hint representations
+        if args.retrive_hint:
+            train_dataset.augment = False # this is not gonna work if there are multiple workers
+            hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
+            train_dataset.augment = True
+        train_acc, _ = test(epoch, 'train', hint_rep_dict)
+        val_acc, _ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
         #  val_tre, val_tre_std = eval_tre(epoch, 'val')
         val_tre, val_tre_std = 0.0, 0.0
 
-        test_acc, test_raw_scores = test(epoch, 'test')
+        test_acc, test_raw_scores = test(epoch, 'test', hint_rep_dict)
         if has_same:
-            val_same_acc, _ = test(epoch, 'val_same')
-            test_same_acc, test_same_raw_scores = test(epoch, 'test_same')
+            val_same_acc, _ = test(epoch, 'val_same', hint_rep_dict)
+            test_same_acc, test_same_raw_scores = test(epoch, 'test_same', hint_rep_dict)
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
@@ -687,7 +724,7 @@ if __name__ == "__main__":
         test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)
 
         epoch_acc = (val_acc + val_same_acc) / 2
-        is_best_epoch = epoch_acc > best_val_acc
+        is_best_epoch = epoch_acc > (best_val_acc + best_val_same_acc) / 2
         if is_best_epoch:
             best_epoch = epoch
             best_epoch_acc = epoch_acc
@@ -737,8 +774,8 @@ if __name__ == "__main__":
         '(best_val)', best_epoch, best_val_acc))
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_val_same)', best_epoch, best_val_same_acc))
-    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
-        '(best_test)', best_epoch, best_test_acc))
+    print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}\tCI: {:.4f}'.format(
+        '(best_test)', best_epoch, best_test_acc, best_test_acc_ci))
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_test_same)', best_epoch, best_test_same_acc))
     print('====>')
