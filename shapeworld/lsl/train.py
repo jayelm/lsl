@@ -423,7 +423,6 @@ if __name__ == "__main__":
                 # Use hypothesis to compute prediction loss
                 # (how well does true hint match image repr)?
                 if args.scheduled_sampling:
-                    print("enable scheduled sampling")
                     use_truth_prob = 1 - ((batch_idx + 1) + n_steps * (epoch - 1)) / n_steps / args.epochs
 
                     use_truth = np.random.choice(a=[True, False], p=[use_truth_prob, 1 - use_truth_prob])

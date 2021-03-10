@@ -299,7 +299,7 @@ class TextProposal(nn.Module):
 
     def test_sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
         with torch.no_grad():
-            self.sample(feats, sos_index, eos_index, pad_index, greedy=False)
+            return self.sample(feats, sos_index, eos_index, pad_index, greedy=greedy)
 
 class EmbedImageRep(nn.Module):
     def __init__(self, z_dim):
