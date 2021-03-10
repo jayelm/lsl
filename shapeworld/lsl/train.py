@@ -202,6 +202,10 @@ if __name__ == "__main__":
     parser.add_argument('--cuda',
                         action='store_true',
                         help='Enables CUDA training')
+    parser.add_argument(
+        '--scheduled_sampling',
+        action='store_true',
+        help='Use scheduled samping during training')
     args = parser.parse_args()
 
     if args.oracle and not args.infer_hyp:
@@ -418,7 +422,28 @@ if __name__ == "__main__":
             if args.infer_hyp:
                 # Use hypothesis to compute prediction loss
                 # (how well does true hint match image repr)?
-                hint_rep = hint_model(hint_seq, hint_length)
+                if args.scheduled_sampling:
+                    print("enable scheduled sampling")
+                    use_truth_prob = 1 - ((batch_idx + 1) + n_steps * (epoch - 1)) / n_steps / args.epochs
+
+                    use_truth = np.random.choice(a=[True, False], p=[use_truth_prob, 1 - use_truth_prob])
+                    if not use_truth:
+                        # print(use_truth_prob)
+                        hint_modified_seq, hint_modified_length = proposal_model.sample(
+                            examples_rep_mean,
+                            sos_index,
+                            eos_index,
+                            pad_index,
+                            greedy=False)
+                        hint_modified_seq = hint_modified_seq.to(device)
+                        hint_modified_length = hint_modified_length.to(device)
+                        hint_rep = hint_model(hint_modified_seq, hint_modified_length)
+                    else:
+                        hint_rep = hint_model(hint_seq, hint_length)
+
+                else:
+                    hint_rep = hint_model(hint_seq, hint_length)
+
                 if args.multimodal_concept:
                     hint_rep = multimodal_model(hint_rep, examples_rep_mean)
 
@@ -558,7 +583,7 @@ if __name__ == "__main__":
                             hint_seq = hint_rep_dict[1][closest_neighbor_idx]
                             hint_length = hint_rep_dict[2][closest_neighbor_idx]
                         elif not args.oracle:
-                            hint_seq, hint_length = proposal_model.sample(
+                            hint_seq, hint_length = proposal_model.test_sample(
                                 examples_rep_mean,
                                 sos_index,
                                 eos_index,
@@ -784,3 +809,6 @@ if __name__ == "__main__":
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_test_avg)', best_epoch,
         (best_test_acc + best_test_same_acc) / 2))
+    print('====> {:>17}\tEpoch: {}\tAccuracy CI: {:.4f}'.format(
+        '(best_test_acc_ci)', best_epoch,
+        best_test_acc_ci))
