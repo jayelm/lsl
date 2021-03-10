@@ -419,7 +419,6 @@ if __name__ == "__main__":
                 # Use hypothesis to compute prediction loss
                 # (how well does true hint match image repr)?
                 hint_rep = hint_model(hint_seq, hint_length)
-                
                 if args.multimodal_concept:
                     hint_rep = multimodal_model(hint_rep, examples_rep_mean)
 
@@ -513,7 +512,6 @@ if __name__ == "__main__":
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
-            r_accs = []
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
                 examples = examples.to(device)
                 image = image.to(device)
@@ -558,6 +556,7 @@ if __name__ == "__main__":
                         # If --oracle, hint_seq/hint_length is given
                         if args.retrive_hint:
                             hint_seq = hint_rep_dict[1][closest_neighbor_idx]
+                            hint_length = hint_rep_dict[2][closest_neighbor_idx]
                         elif not args.oracle:
                             hint_seq, hint_length = proposal_model.sample(
                                 examples_rep_mean,
@@ -565,6 +564,8 @@ if __name__ == "__main__":
                                 eos_index,
                                 pad_index,
                                 greedy=j == 0)
+                        elif args.oracle:
+                            pass
                         else:
                             raise RuntimeError("Should not reach here")
                         
@@ -702,7 +703,6 @@ if __name__ == "__main__":
             train_dataset.augment = False # this is not gonna work if there are multiple workers
             hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
             train_dataset.augment = True
-
         train_acc, _ = test(epoch, 'train', hint_rep_dict)
         val_acc, _ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set

@@ -5,16 +5,18 @@ def construct_dict(dataloader, image_model=None, hint_model=None, multimodal_mod
     image_model.eval()
     hint_model.eval()
 
-    for examples, image, label, hint, hint_length, *rest in dataloader:
-        hint = hint.cuda()
-        examples_rep_mean = torch.mean(image_model(examples.cuda()), dim=1)
+    with torch.no_grad():
+        for examples, image, label, hint, hint_length, *rest in dataloader:
+            hint = hint.cuda()
+            examples_rep_mean = torch.mean(image_model(examples.cuda()), dim=1)
+
+            if len(hint_rep_dict) == 0:
+                hint_rep_dict.extend([examples_rep_mean, hint, hint_length])
+            else:
+                hint_rep_dict[0] = torch.cat((hint_rep_dict[0], examples_rep_mean), dim=0)
+                hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint), dim=0)
+                hint_rep_dict[2] = torch.cat((hint_rep_dict[2], hint_length), dim=0)
         
-        if len(hint_rep_dict) == 0:
-            hint_rep_dict.extend([examples_rep_mean, hint])
-        else:
-            hint_rep_dict[0] = torch.cat((hint_rep_dict[0], examples_rep_mean), dim=0)
-            hint_rep_dict[1] = torch.cat((hint_rep_dict[1], hint), dim=0)
-    
     return hint_rep_dict
 
 def dot_product(query, key):
