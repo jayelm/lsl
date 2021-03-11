@@ -36,7 +36,7 @@ class ExWrapper(nn.Module):
         if len(x.shape) == 5:
             x_enc = x_enc.view(batch_size, n_ex, -1)
 
-        return F.normalize(x_enc)
+        return F.normalize(x_enc, dim=-1)
 
 
 class Identity(nn.Module):
@@ -108,7 +108,7 @@ class TextRep(nn.Module):
             _, reversed_idx = torch.sort(sorted_idx)
             hidden = hidden[reversed_idx]
 
-        return F.normalize(hidden)
+        return F.normalize(hidden, dim=-1)
 
 
 class MultimodalDeepRep(nn.Module):
