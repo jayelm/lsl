@@ -17,9 +17,10 @@ class ExWrapper(nn.Module):
     (batch_size, n_ex, *img_dims)
     """
 
-    def __init__(self, model):
+    def __init__(self, model, retrieve_mode=False):
         super(ExWrapper, self).__init__()
         self.model = model
+        self.retrieve_mode = retrieve_mode
 
     def forward(self, x):
         batch_size = x.shape[0]
@@ -36,8 +37,10 @@ class ExWrapper(nn.Module):
         if len(x.shape) == 5:
             x_enc = x_enc.view(batch_size, n_ex, -1)
 
-        return F.normalize(x_enc)
-
+        if self.retrieve_mode:
+            return F.normalize(x_enc, dim=1)
+        else:
+            return x_enc
 
 class Identity(nn.Module):
     def forward(self, x):
@@ -77,11 +80,12 @@ class TextRep(nn.Module):
     Again, this uses 512 hidden dimensions.
     """
 
-    def __init__(self, embedding_module, hidden_size=512):
+    def __init__(self, embedding_module, hidden_size=512, retrieve_mode=False):
         super(TextRep, self).__init__()
         self.embedding = embedding_module
         self.embedding_dim = embedding_module.embedding_dim
         self.gru = nn.GRU(self.embedding_dim, hidden_size) # 512
+        self.retrieve_mode = retrieve_mode
 
     def forward(self, seq, length):
         batch_size = seq.size(0)
@@ -108,8 +112,11 @@ class TextRep(nn.Module):
             _, reversed_idx = torch.sort(sorted_idx)
             hidden = hidden[reversed_idx]
 
-        return F.normalize(hidden)
 
+        if self.retrieve_mode:
+            return F.normalize(hidden, dim=1)
+        else:
+            return hidden
 
 class MultimodalDeepRep(nn.Module):
     def __init__(self):

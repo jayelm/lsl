@@ -22,11 +22,12 @@ from utils import (
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, TextProposal, ExWrapper
-from models import MultimodalRep
+from models import MultimodalRep,MultimodalDeepRep
 from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 from retrivers import construct_dict, dot_product, cos_similarity, l2_distance
+import matplotlib.pyplot as plt
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -206,6 +207,10 @@ if __name__ == "__main__":
         '--scheduled_sampling',
         action='store_true',
         help='Use scheduled samping during training')
+    parser.add_argument(
+        '--plot_bleu_score',
+        action='store_true',
+        help='Use scheduled samping during training')
     args = parser.parse_args()
 
     if args.oracle and not args.infer_hyp:
@@ -341,7 +346,10 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512))
+    if args.retrive_hint:
+        image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512), retrieve_mode=True)
+    else:
+        image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512))
     image_model = image_model.to(device)
     params_to_optimize = list(image_model.parameters())
 
@@ -366,12 +374,15 @@ if __name__ == "__main__":
         params_to_optimize.extend(proposal_model.parameters())
 
     if args.encode_hyp:
-        hint_model = TextRep(embedding_model, hidden_size=512)
+        if args.retrive_hint:
+            hint_model = TextRep(embedding_model, hidden_size=512, retrieve_mode=True)
+        else:
+            hint_model = TextRep(embedding_model, hidden_size=512)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
 
     if args.multimodal_concept:
-        multimodal_model = MultimodalRep()
+        multimodal_model = MultimodalDeepRep()
         multimodal_model = multimodal_model.to(device)
         params_to_optimize.extend(multimodal_model.parameters())
 
@@ -427,7 +438,6 @@ if __name__ == "__main__":
 
                     use_truth = np.random.choice(a=[True, False], p=[use_truth_prob, 1 - use_truth_prob])
                     if not use_truth:
-                        # print(use_truth_prob)
                         hint_modified_seq, hint_modified_length = proposal_model.sample(
                             examples_rep_mean,
                             sos_index,
@@ -532,7 +542,10 @@ if __name__ == "__main__":
 
         accuracy_meter = AverageMeter(raw=True)
         retrival_acc_meter = AverageMeter(raw=True)
-        bleu_meter = AverageMeter(raw=True)
+        bleu_meter_n1 = AverageMeter(raw=True)
+        bleu_meter_n2 = AverageMeter(raw=True)
+        bleu_meter_n3 = AverageMeter(raw=True)
+        bleu_meter_n4 = AverageMeter(raw=True)
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
@@ -627,7 +640,14 @@ if __name__ == "__main__":
                             best_predictions = label_hat
                     hint_seq = idx2word(hint_seq, data_loader.dataset.i2w, remove_pad=True)
                     support_hint = idx2word(support_hint, data_loader.dataset.i2w, remove_pad=True, target=True)
-                    bleu = bleu_score(hint_seq, support_hint)
+                    bleu_n4 = bleu_score(hint_seq, support_hint, max_n=4, weights=[0.0, 0.0, 0.0, 1.0])
+                    bleu_meter_n4.update(bleu_n4, batch_size, raw_scores=[bleu_n4])
+                    bleu_n3 = bleu_score(hint_seq, support_hint,  max_n=3, weights=[0.0, 0.0, 1.0])
+                    bleu_meter_n3.update(bleu_n3, batch_size, raw_scores=[bleu_n3])
+                    bleu_n2 = bleu_score(hint_seq, support_hint, max_n=2, weights=[0, 1.0])
+                    bleu_meter_n2.update(bleu_n2, batch_size, raw_scores=[bleu_n2])
+                    bleu_n1 = bleu_score(hint_seq, support_hint, max_n=1, weights=[1.0])
+                    bleu_meter_n1.update(bleu_n1, batch_size, raw_scores=[bleu_n1])
                     accuracy = accuracy_score(label_np, best_predictions)
                 else:
                     # Compare image directly to example rep
@@ -640,12 +660,10 @@ if __name__ == "__main__":
                 accuracy_meter.update(accuracy,
                                       batch_size,
                                       raw_scores=(label_hat == label_np))
-                bleu_meter.update(bleu, batch_size, raw_scores=[bleu])
 
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tBLEU Score: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
-            '({})'.format(split), epoch, accuracy_meter.avg, bleu_meter.avg, retrival_acc_meter.avg))
-
-        return accuracy_meter.avg, accuracy_meter.raw_scores
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tBLEU_n1 Score: {:.4f}\tBLEU_n2 Score: {:.4f} \tBLEU_n3 Score: {:.4f}\tBLEU_n4 Score: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, accuracy_meter.avg, bleu_meter_n1.avg, bleu_meter_n2.avg, bleu_meter_n3.avg, bleu_meter_n4.avg, retrival_acc_meter.avg))
+        return accuracy_meter.avg, accuracy_meter.raw_scores, bleu_meter_n1.avg, bleu_meter_n2.avg, bleu_meter_n3.avg, bleu_meter_n4.avg
 
     tre_comp_fn = TRE_COMP_FNS[args.tre_comp]()
     tre_err_fn = TRE_ERR_FNS[args.tre_err]()
@@ -717,26 +735,34 @@ if __name__ == "__main__":
     lowest_val_tre_std = 0
     metrics = defaultdict(lambda: [])
 
+    val_acc_collection = []
+    bleu_n1_collection = []
+    bleu_n2_collection = []
+    bleu_n3_collection = []
+    bleu_n4_collection = []
+
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     hint_rep_dict = None
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch)
 
+        if epoch <= 40 or  epoch % 4 != 0:
+            continue
         # storing seen concepts' hint representations
         if args.retrive_hint:
             train_dataset.augment = False # this is not gonna work if there are multiple workers
             hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
             train_dataset.augment = True
-        train_acc, _ = test(epoch, 'train', hint_rep_dict)
-        val_acc, _ = test(epoch, 'val', hint_rep_dict)
+        train_acc, _ , _, _ , _, _= test(epoch, 'train', hint_rep_dict)
+        val_acc, _, val_bleu_n1, val_bleu_n2, val_bleu_n3, val_bleu_n4 = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
         #  val_tre, val_tre_std = eval_tre(epoch, 'val')
         val_tre, val_tre_std = 0.0, 0.0
 
-        test_acc, test_raw_scores = test(epoch, 'test', hint_rep_dict)
+        test_acc, test_raw_scores, _, _, _, _ = test(epoch, 'test', hint_rep_dict)
         if has_same:
-            val_same_acc, _ = test(epoch, 'val_same', hint_rep_dict)
-            test_same_acc, test_same_raw_scores = test(epoch, 'test_same', hint_rep_dict)
+            val_same_acc, _, val_same_bleu_n1, val_same_bleu_n2, val_same_bleu_n3, val_same_bleu_n4 = test(epoch, 'val_same', hint_rep_dict)
+            test_same_acc, test_same_raw_scores, _, _, _, _ = test(epoch, 'test_same', hint_rep_dict)
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
@@ -749,6 +775,16 @@ if __name__ == "__main__":
 
         epoch_acc = (val_acc + val_same_acc) / 2
         is_best_epoch = epoch_acc > (best_val_acc + best_val_same_acc) / 2
+        average_bleu_n1 = (val_same_bleu_n1 + val_bleu_n1) / 2
+        average_bleu_n2 = (val_same_bleu_n2 + val_bleu_n2) / 2
+        average_bleu_n3 = (val_same_bleu_n3 + val_bleu_n3) / 2
+        average_bleu_n4 = (val_same_bleu_n4 + val_bleu_n4) / 2
+        val_acc_collection.append(epoch_acc)
+        bleu_n1_collection.append(average_bleu_n1)
+        bleu_n4_collection.append(average_bleu_n4)
+        bleu_n2_collection.append(average_bleu_n2)
+        bleu_n3_collection.append(average_bleu_n3)
+
         if is_best_epoch:
             best_epoch = epoch
             best_epoch_acc = epoch_acc
@@ -759,7 +795,10 @@ if __name__ == "__main__":
             best_test_acc = test_acc
             best_test_same_acc = test_same_acc
             best_test_acc_ci = test_acc_ci
-
+            best_test_bleu_n1 = average_bleu_n1
+            best_test_bleu_n2 = average_bleu_n2
+            best_test_bleu_n3 = average_bleu_n3
+            best_test_bleu_n4 = average_bleu_n4
         if val_tre < lowest_val_tre:
             lowest_val_tre = val_tre
             lowest_val_tre_std = val_tre_std
@@ -811,3 +850,27 @@ if __name__ == "__main__":
     print('====> {:>17}\tEpoch: {}\tAccuracy CI: {:.4f}'.format(
         '(best_test_acc_ci)', best_epoch,
         best_test_acc_ci))
+    print('====> {:>17}\tEpoch: {}\tBLEU_N1: {:.4f}'.format(
+        '(best_test_bleu_n1)', best_epoch,
+        best_test_bleu_n1))
+    print('====> {:>17}\tEpoch: {}\tBLEU_N1: {:.4f}'.format(
+        '(best_test_bleu_n2)', best_epoch,
+        best_test_bleu_n2))
+    print('====> {:>17}\tEpoch: {}\tBLEU_N4: {:.4f}'.format(
+        '(best_test_bleu_n3)', best_epoch,
+        best_test_bleu_n3))
+    print('====> {:>17}\tEpoch: {}\tBLEU_N4: {:.4f}'.format(
+        '(best_test_bleu_n4)', best_epoch,
+        best_test_bleu_n4))
+    if args.plot_bleu_score:
+        x = (np.array(range(len(val_acc_collection))) + 1) * 4
+        plt.plot(x, val_acc_collection, label = "validation accuracy")
+        plt.plot(x, bleu_n1_collection, label = "bleu n=1")
+        plt.plot(x, bleu_n2_collection, label = "bleu n=2")
+        plt.plot(x, bleu_n3_collection, label = "bleu n=3")
+        plt.plot(x, bleu_n4_collection, label = "bleu n=4")
+        plt.xlabel('epoch')
+        plt.ylabel('%')
+        plt.legend( loc="upper right")
+        plt.savefig('accuracy_vs_bleu_original.png')
+
