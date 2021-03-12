@@ -1,5 +1,16 @@
 import torch
 
+def gen_retriever(retriver):
+    if retriver == "dot":
+        return dot_product
+    elif retriver == "l2":
+        return l2_distance
+    elif retriver == "cos":
+        return cos_similarity
+    else:
+        raise RuntimeError("No Retriever Selected")
+
+
 def construct_dict(dataloader, image_model=None, hint_model=None, multimodal_model=None):
     hint_rep_dict = []
     image_model.eval()
@@ -23,6 +34,12 @@ def dot_product(query, key):
     return torch.argmax(query @ key.T, dim=1)
 
 def l2_distance(query, key):
+    # q_np = query.cpu()
+    # key_np = key.cpu()
+    # res = scipy.spatial.distance.cdist(q_np, key_np, 'minkowski', p=2)
+    # out_n = np.argmin(res, axis=1)
+    # out_n = torch.from_numpy(out_n).cuda()
+
     return torch.argmin(torch.cdist(query, key, 2), dim=1)
 
 def cos_similarity(query, key):
