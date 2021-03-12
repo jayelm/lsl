@@ -827,3 +827,6 @@ if __name__ == "__main__":
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_test_avg)', best_epoch,
         (best_test_acc + best_test_same_acc) / 2))
+    print('====> {:>17}\tEpoch: {}\tAccuracy CI: {:.4f}'.format(
+        '(best_test_acc_ci)', best_epoch,
+        best_test_acc_ci))

@@ -241,65 +241,67 @@ class TextProposal(nn.Module):
 
     def sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
         """Generate from image features using greedy search."""
-        with torch.no_grad():
-            batch_size = feats.size(0)
+        batch_size = feats.size(0)
 
-            # initialize hidden states using image features
-            states = feats.repeat(self.gru.num_layers,1,1) #.unsqueeze(0)
+        # initialize hidden states using image features
+        states = feats.repeat(self.gru.num_layers,1,1) #.unsqueeze(0)
 
-            # first input is SOS token
-            inputs = np.array([sos_index for _ in range(batch_size)])
-            inputs = torch.from_numpy(inputs)
-            inputs = inputs.unsqueeze(1)
-            inputs = inputs.to(feats.device)
+        # first input is SOS token
+        inputs = np.array([sos_index for _ in range(batch_size)])
+        inputs = torch.from_numpy(inputs)
+        inputs = inputs.unsqueeze(1)
+        inputs = inputs.to(feats.device)
 
-            # save SOS as first generated token
-            inputs_npy = inputs.squeeze(1).cpu().numpy()
-            sampled_ids = [[w] for w in inputs_npy]
+        # save SOS as first generated token
+        inputs_npy = inputs.squeeze(1).cpu().numpy()
+        sampled_ids = [[w] for w in inputs_npy]
 
-            # (B,L,D) to (L,B,D)
-            inputs = inputs.transpose(0, 1)
+        # (B,L,D) to (L,B,D)
+        inputs = inputs.transpose(0, 1)
 
-            # compute embeddings
-            inputs = self.embedding(inputs)
+        # compute embeddings
+        inputs = self.embedding(inputs)
 
-            for i in range(20):  # like in jacobs repo
-                outputs, states = self.gru(inputs,
-                                           states)  # outputs: (L=1,B,H)
-                outputs = outputs.squeeze(0)  # outputs: (B,H)
-                outputs = self.outputs2vocab(outputs)  # outputs: (B,V)
+        for i in range(20):  # like in jacobs repo
+            outputs, states = self.gru(inputs,
+                                       states)  # outputs: (L=1,B,H)
+            outputs = outputs.squeeze(0)  # outputs: (B,H)
+            outputs = self.outputs2vocab(outputs)  # outputs: (B,V)
 
-                if greedy:
-                    predicted = outputs.max(1)[1]
-                    predicted = predicted.unsqueeze(1)
-                else:
-                    outputs = F.softmax(outputs, dim=1)
-                    predicted = torch.multinomial(outputs, 1)
+            if greedy:
+                predicted = outputs.max(1)[1]
+                predicted = predicted.unsqueeze(1)
+            else:
+                outputs = F.softmax(outputs, dim=1)
+                predicted = torch.multinomial(outputs, 1)
 
-                predicted_npy = predicted.squeeze(1).cpu().numpy()
-                predicted_lst = predicted_npy.tolist()
+            predicted_npy = predicted.squeeze(1).cpu().numpy()
+            predicted_lst = predicted_npy.tolist()
 
-                for w, so_far in zip(predicted_lst, sampled_ids):
-                    if so_far[-1] != eos_index:
-                        so_far.append(w)
+            for w, so_far in zip(predicted_lst, sampled_ids):
+                if so_far[-1] != eos_index:
+                    so_far.append(w)
 
-                inputs = predicted.transpose(0, 1)  # inputs: (L=1,B)
-                inputs = self.embedding(inputs)  # inputs: (L=1,B,E)
+            inputs = predicted.transpose(0, 1)  # inputs: (L=1,B)
+            inputs = self.embedding(inputs)  # inputs: (L=1,B,E)
 
-            sampled_lengths = [len(text) for text in sampled_ids]
-            sampled_lengths = np.array(sampled_lengths)
+        sampled_lengths = [len(text) for text in sampled_ids]
+        sampled_lengths = np.array(sampled_lengths)
 
-            max_length = max(sampled_lengths)
-            padded_ids = np.ones((batch_size, max_length)) * pad_index
+        max_length = max(sampled_lengths)
+        padded_ids = np.ones((batch_size, max_length)) * pad_index
 
-            for i in range(batch_size):
-                padded_ids[i, :sampled_lengths[i]] = sampled_ids[i]
+        for i in range(batch_size):
+            padded_ids[i, :sampled_lengths[i]] = sampled_ids[i]
 
-            sampled_lengths = torch.from_numpy(sampled_lengths).long()
-            sampled_ids = torch.from_numpy(padded_ids).long()
+        sampled_lengths = torch.from_numpy(sampled_lengths).long()
+        sampled_ids = torch.from_numpy(padded_ids).long()
 
         return sampled_ids, sampled_lengths
 
+    def test_sample(self, feats, sos_index, eos_index, pad_index, greedy=False):
+        with torch.no_grad():
+            return self.sample(feats, sos_index, eos_index, pad_index, greedy=greedy)
 
 class EmbedImageRep(nn.Module):
     def __init__(self, z_dim):
