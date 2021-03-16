@@ -40,7 +40,7 @@ class ExWrapper(nn.Module):
         # during training normalize across four examples
         # during testing instance normalize
         if self.retrieve_mode:
-            return F.normalize(x_enc, dim=1)
+            return F.normalize(x_enc, dim=-1)
         else:
             return x_enc
 
@@ -114,10 +114,8 @@ class TextRep(nn.Module):
             _, reversed_idx = torch.sort(sorted_idx)
             hidden = hidden[reversed_idx]
 
-        return F.normalize(hidden, dim=-1)
-
         if self.retrieve_mode:
-            return F.normalize(hidden, dim=1)
+            return F.normalize(hidden, dim=-1)
         else:
             return hidden
 
