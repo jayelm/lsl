@@ -1,7 +1,7 @@
 import torch
 
 def gen_retriever(retriver):
-    if retriver == "dot":
+    if retriver == "dotp":
         return dot_product
     elif retriver == "l2":
         return l2_distance

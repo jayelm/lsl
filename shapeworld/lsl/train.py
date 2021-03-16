@@ -22,11 +22,11 @@ from utils import (
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
 from models import ImageRep, TextRep, TextProposal, ExWrapper
-from models import MultimodalRep, MultimodalDeepRep
+from models import MultimodalRep
 from models import DotPScorer, BilinearScorer
 from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
-from retrivers import gen_retriever, construct_dict
+from retrievers import construct_dict, gen_retriever
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -107,12 +107,14 @@ if __name__ == "__main__":
                         type=int,
                         default=10,
                         help='Number of hypotheses to infer')
-    parser.add_argument('--oracle',
-                        action='store_true',
-                        help='Use oracle hypotheses for prediction (requires --infer_hyp)')
-    parser.add_argument('--retrive_hint',
-                        action='store_true',
-                        help='use the hint of tasks seen during training time (requires --infer_hyp)')
+    parser.add_argument(
+        '--oracle',
+        action='store_true',
+        help='Use oracle hypotheses for prediction (requires --infer_hyp)')
+    parser.add_argument(
+        '--hint_retriever',
+        choices=['dotp', 'l2', "cos"],
+        help='use the hint of tasks seen during training time (requires --infer_hyp)')
     parser.add_argument('--max_train',
                         type=int,
                         default=None,
@@ -200,16 +202,13 @@ if __name__ == "__main__":
     parser.add_argument('--cuda',
                         action='store_true',
                         help='Enables CUDA training')
-    parser.add_argument('--scheduled_sampling',
-                        action='store_true',
-                        help='Use scheduled samping during training')
     args = parser.parse_args()
 
     if args.oracle and not args.infer_hyp:
         parser.error("Must specify --infer_hyp to use --oracle")
 
-    if args.retrive_hint and not args.infer_hyp:
-        parser.error("Must specify --infer_hyp to use --retrive_hint")
+    if args.hint_retriever and not args.infer_hyp:
+        parser.error("Must specify --infer_hyp to use --hint_retriever")
 
     if args.multimodal_concept and not args.infer_hyp:
         parser.error("Must specify --infer_hyp to use --multimodal_concept")
@@ -225,9 +224,7 @@ if __name__ == "__main__":
     args.encode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'embed')
     args.decode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'generate')
 
-    multimodal_init = True
-
-    if args.oracle or (args.retrive_hint and not multimodal_init): 
+    if args.oracle or args.hint_retriever: 
         args.n_infer = 1  # No need to repeatedly infer, hint is given
 
     if not os.path.isdir(args.exp_dir):
@@ -360,17 +357,17 @@ if __name__ == "__main__":
         embedding_model = nn.Embedding(train_vocab_size, 512)
 
     if args.decode_hyp:
-        proposal_model = TextProposal(embedding_model, hidden_size=512, num_layers=2)
+        proposal_model = TextProposal(embedding_model, hidden_size=512)
         proposal_model = proposal_model.to(device)
         params_to_optimize.extend(proposal_model.parameters())
 
     if args.encode_hyp:
-        hint_model = TextRep(embedding_model, hidden_size=512, num_layers=2)
+        hint_model = TextRep(embedding_model, hidden_size=512)
         hint_model = hint_model.to(device)
         params_to_optimize.extend(hint_model.parameters())
 
     if args.multimodal_concept:
-        multimodal_model = MultimodalDeepRep() #MultimodalRep()
+        multimodal_model = MultimodalRep()
         multimodal_model = multimodal_model.to(device)
         params_to_optimize.extend(multimodal_model.parameters())
 
@@ -381,9 +378,7 @@ if __name__ == "__main__":
     }[args.optimizer]
     optimizer = optfunc(params_to_optimize, lr=args.lr)
 
-    retrive_fn = gen_retriever("l2")
-
-    def train(epoch, n_steps=100, hint_rep_dict=None):
+    def train(epoch, n_steps=100):
         image_model.train()
         scorer_model.train()
         if args.decode_hyp:
@@ -418,49 +413,13 @@ if __name__ == "__main__":
             image_rep = image_model(image)
             examples_rep = image_model(examples)
             examples_rep_mean = torch.mean(examples_rep, dim=1)
-          
+
             # Prediction loss
             if args.infer_hyp:
                 # Use hypothesis to compute prediction loss
                 # (how well does true hint match image repr)?
-                # How plausible is the true hint under example/image rep?
-                if args.predict_image_hyp:
-                    # Use raw images, flatten out tasks
-                    hyp_batch_size = batch_size * n_ex
-                    hyp_source_rep = examples_rep.view(hyp_batch_size, -1)
-                    hint_seq = hint_seq.unsqueeze(1).repeat(1, n_ex, 1).view(
-                        hyp_batch_size, -1)
-                    hint_length = hint_length.unsqueeze(1).repeat(
-                        1, n_ex).view(hyp_batch_size)
-                else:
-                    # if multimodal_init, use multi_modal output as gru initialization
-                    if multimodal_init and epoch > 1:
-                        closest_neighbor_idx = retrive_fn(examples_rep_mean, hint_rep_dict[0])
-                        closest_hint = hint_model(hint_rep_dict[1][closest_neighbor_idx], hint_rep_dict[2][closest_neighbor_idx])
-                        hyp_source_rep = multimodal_model(closest_hint, examples_rep_mean)
-                    else:
-                        hyp_source_rep = examples_rep_mean 
-                        
-                    hyp_batch_size = batch_size
-
-                if args.scheduled_sampling:
-                    use_truth_prob = 1 - ((batch_idx + 1) + n_steps * (epoch - 1)) / n_steps / args.epochs
-
-                    use_truth = np.random.choice(a=[True, False], p=[use_truth_prob, 1 - use_truth_prob])
-                    if not use_truth:
-                        hint_modified_seq, hint_modified_length = proposal_model.sample(
-                            hyp_source_rep,
-                            sos_index,
-                            eos_index,
-                            pad_index,
-                            greedy=False)
-                        hint_modified_seq = hint_modified_seq.to(device)
-                        hint_modified_length = hint_modified_length.to(device)
-                        hint_rep = hint_model(hint_modified_seq, hint_modified_length)
-                    else:
-                        hint_rep = hint_model(hint_seq, hint_length)
-
-                if args.multimodal_concept and not multimodal_init:
+                hint_rep = hint_model(hint_seq, hint_length)
+                if args.multimodal_concept:
                     hint_rep = multimodal_model(hint_rep, examples_rep_mean)
 
                 score = scorer_model.score(hint_rep, image_rep)
@@ -480,6 +439,18 @@ if __name__ == "__main__":
 
             # Hypothesis loss
             if args.use_hyp:
+                # How plausible is the true hint under example/image rep?
+                if args.predict_image_hyp:
+                    # Use raw images, flatten out tasks
+                    hyp_batch_size = batch_size * n_ex
+                    hyp_source_rep = examples_rep.view(hyp_batch_size, -1)
+                    hint_seq = hint_seq.unsqueeze(1).repeat(1, n_ex, 1).view(
+                        hyp_batch_size, -1)
+                    hint_length = hint_length.unsqueeze(1).repeat(
+                        1, n_ex).view(hyp_batch_size)
+                else:
+                    hyp_source_rep = examples_rep_mean
+                    hyp_batch_size = batch_size
 
                 if args.predict_hyp and args.predict_hyp_task == 'embed':
                     # Encode hints, minimize distance between hint and images/examples
@@ -502,14 +473,6 @@ if __name__ == "__main__":
                                                 reduction='none')
                     hypo_loss = hypo_loss.view(hyp_batch_size, (seq_len - 1))
                     hypo_loss = torch.mean(torch.sum(hypo_loss, dim=1))
-
-
-                if args.poe:
-                    image_score = scorer_model.score(examples_rep_mean,
-                                                     image_rep)
-                    score = score + image_score
-                pred_loss = F.binary_cross_entropy_with_logits(
-                    score, label.float())
 
                 loss = args.pred_lambda * pred_loss + args.hypo_lambda * hypo_loss
             else:
@@ -563,10 +526,10 @@ if __name__ == "__main__":
                     examples_rep = image_model(examples)
                     examples_rep_mean = torch.mean(examples_rep, dim=1)
 
-                if args.retrive_hint:
-                    # retrive the hint representation of the closest concept
-                    closest_neighbor_idx = retrive_fn(examples_rep_mean, hint_rep_dict[0]) 
-                    
+                if args.hint_retriever:
+                    # retrieve the hint representation of the closest concept
+                    closest_neighbor_idx = gen_retriever(args.hint_retriever)(examples_rep_mean, hint_rep_dict[0]) 
+
                     # calculating retrival accuracy
                     raw_scores = torch.prod(torch.eq(hint_rep_dict[1][closest_neighbor_idx], hint_seq.cuda()).float(), dim=1)
                     retrival_acc = torch.mean(raw_scores)
@@ -584,25 +547,17 @@ if __name__ == "__main__":
                     best_hint_scores = np.full(batch_size,
                                                -np.inf,
                                                dtype=np.float32)
+
                     support_hint = hint_seq
-                    
-                    # use retrived hint_seq and hint_length
-                    if args.retrive_hint:
-                        hint_seq = hint_rep_dict[1][closest_neighbor_idx]
-                        hint_length = hint_rep_dict[2][closest_neighbor_idx]
-                    
                     for j in range(args.n_infer):
                         # Decode greedily for first hyp; otherwise sample
                         # If --oracle, hint_seq/hint_length is given
-                       
-                        if not args.oracle and (args.retrive_hint and multimodal_init):
-                            if multimodal_init:
-                                hint_rep = hint_model(hint_seq, hint_length)
-                                proposal_init = multimodal_model(hint_rep, examples_rep_mean)
-                            else:
-                                proposal_init = examples_rep_mean
+                        if args.hint_retriever:
+                            hint_seq = hint_rep_dict[1][closest_neighbor_idx]
+                            hint_length = hint_rep_dict[2][closest_neighbor_idx]
+                        elif not args.oracle:
                             hint_seq, hint_length = proposal_model.sample(
-                                proposal_init,
+                                examples_rep_mean,
                                 sos_index,
                                 eos_index,
                                 pad_index,
@@ -624,7 +579,7 @@ if __name__ == "__main__":
                             hint_scores = hint_scores.cpu().numpy()
 
                         # Compute prediction for this hint
-                        if args.multimodal_concept and not multimodal_init:
+                        if args.multimodal_concept:
                             hint_rep = multimodal_model(
                                 hint_rep, examples_rep_mean)
                         score = scorer_model.score(hint_rep, image_rep)
@@ -636,7 +591,7 @@ if __name__ == "__main__":
                         label_hat = label_hat.cpu().numpy()
 
                         # Update scores and predictions for best running hints
-                        if not args.oracle and not args.retrive_hint:
+                        if not args.oracle and not args.hint_retriever:
                             updates = hint_scores > best_hint_scores
                             best_hint_scores = np.where(
                                 updates, hint_scores, best_hint_scores)
@@ -739,10 +694,10 @@ if __name__ == "__main__":
     save_defaultdict_to_fs(vars(args), os.path.join(args.exp_dir, 'args.json'))
     hint_rep_dict = None
     for epoch in range(1, args.epochs + 1):
-        train_loss = train(epoch, hint_rep_dict=hint_rep_dict)
+        train_loss = train(epoch)
 
         # storing seen concepts' hint representations
-        if args.retrive_hint:
+        if args.hint_retriever:
             train_dataset.augment = False # this is not gonna work if there are multiple workers
             hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
             train_dataset.augment = True
@@ -827,6 +782,3 @@ if __name__ == "__main__":
     print('====> {:>17}\tEpoch: {}\tAccuracy: {:.4f}'.format(
         '(best_test_avg)', best_epoch,
         (best_test_acc + best_test_same_acc) / 2))
-    print('====> {:>17}\tEpoch: {}\tAccuracy CI: {:.4f}'.format(
-        '(best_test_acc_ci)', best_epoch,
-        best_test_acc_ci))
