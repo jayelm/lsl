@@ -346,7 +346,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(args.backbone)
 
-    if args.retrive_hint:
+    if args.hint_retriever:
         image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512), retrieve_mode=True)
     else:
         image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512))
@@ -374,7 +374,7 @@ if __name__ == "__main__":
         params_to_optimize.extend(proposal_model.parameters())
 
     if args.encode_hyp:
-        if args.retrive_hint:
+        if args.hint_retriever:
             hint_model = TextRep(embedding_model, hidden_size=512, retrieve_mode=True)
         else:
             hint_model = TextRep(embedding_model, hidden_size=512)
@@ -743,24 +743,23 @@ if __name__ == "__main__":
     hint_rep_dict = None
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch)
-
-        if epoch <= 40 or  epoch % 4 != 0:
-            continue
+        # if epoch != 1 and epoch < 20:
+        #     continue
         # storing seen concepts' hint representations
         if args.hint_retriever:
             train_dataset.augment = False # this is not gonna work if there are multiple workers
             hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
             train_dataset.augment = True
-        train_acc, _ , _, _ , _, _= test(epoch, 'train', hint_rep_dict)
-        val_acc, _, val_bleu_n1, val_bleu_n2, val_bleu_n3, val_bleu_n4 = test(epoch, 'val', hint_rep_dict)
+        train_acc, _, _, _, _, _= test(epoch, 'train', hint_rep_dict)
+        val_acc, _, _, _, _, _= test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
         #  val_tre, val_tre_std = eval_tre(epoch, 'val')
         val_tre, val_tre_std = 0.0, 0.0
 
-        test_acc, test_raw_scores, _, _, _, _ = test(epoch, 'test', hint_rep_dict)
+        test_acc, test_raw_scores, test_bleu_n1, test_bleu_n2, test_bleu_n3, test_bleu_n4 = test(epoch, 'test', hint_rep_dict)
         if has_same:
-            val_same_acc, _, val_same_bleu_n1, val_same_bleu_n2, val_same_bleu_n3, val_same_bleu_n4 = test(epoch, 'val_same', hint_rep_dict)
-            test_same_acc, test_same_raw_scores, _, _, _, _ = test(epoch, 'test_same', hint_rep_dict)
+            val_same_acc, _, _, _, _, _ = test(epoch, 'val_same', hint_rep_dict)
+            test_same_acc, test_same_raw_scores, test_same_bleu_n1, test_same_bleu_n2, test_same_bleu_n3, test_same_bleu_n4 = test(epoch, 'test_same', hint_rep_dict)
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
@@ -773,10 +772,10 @@ if __name__ == "__main__":
 
         epoch_acc = (val_acc + val_same_acc) / 2
         is_best_epoch = epoch_acc > (best_val_acc + best_val_same_acc) / 2
-        average_bleu_n1 = (val_same_bleu_n1 + val_bleu_n1) / 2
-        average_bleu_n2 = (val_same_bleu_n2 + val_bleu_n2) / 2
-        average_bleu_n3 = (val_same_bleu_n3 + val_bleu_n3) / 2
-        average_bleu_n4 = (val_same_bleu_n4 + val_bleu_n4) / 2
+        average_bleu_n1 = (test_same_bleu_n1 + test_bleu_n1) / 2
+        average_bleu_n2 = (test_same_bleu_n2 + test_bleu_n2) / 2
+        average_bleu_n3 = (test_same_bleu_n3 + test_bleu_n3) / 2
+        average_bleu_n4 = (test_same_bleu_n4 + test_bleu_n4) / 2
         val_acc_collection.append(epoch_acc)
         bleu_n1_collection.append(average_bleu_n1)
         bleu_n4_collection.append(average_bleu_n4)
