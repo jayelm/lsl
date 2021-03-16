@@ -40,7 +40,7 @@ class ExWrapper(nn.Module):
         # during training normalize across four examples
         # during testing instance normalize
         if self.retrieve_mode:
-            return F.normalize(x_enc, dim=-1)
+            return F.normalize(x_enc, dim=1)
         else:
             return x_enc
 
