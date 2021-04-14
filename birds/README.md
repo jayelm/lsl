@@ -17,9 +17,9 @@ python -m spacy.download en_vectors_web_lg
 ## Data
 
 To download data, cd to `filelists/CUB` and run `source download_CUB.sh`. This
-downloads the CUB 200-2011 dataset.
+downloads the CUB 200-2011 dataset and also runs `python write_CUB_filelist.py`.
 
-Then run `python write_CUB_filelist.py` which saves a filelist (train/val/test) split
+`python write_CUB_filelist.py` saves a filelist (train/val/test) split
 to `./custom_filelists/CUB/{base,val,novel}.json`.
 
 Then run `python save_np.py` which takes the images and serializes them as NP arrays
