@@ -11,7 +11,7 @@ Glove initialization depends on spacy 2.2.2 and the spacy `en_vectors_web_lg`
 model:
 
 ```
-python -m spacy.download en_vectors_web_lg
+python -m spacy download en_vectors_web_lg
 ```
 
 ## Data
