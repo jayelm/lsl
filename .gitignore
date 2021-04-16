@@ -4,3 +4,5 @@
 .Ruserdata
 .vscode
 sync_results.sh
+*.out
+*copy.*

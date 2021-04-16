@@ -743,8 +743,6 @@ if __name__ == "__main__":
     hint_rep_dict = None
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch)
-        # if epoch != 1 and epoch < 20:
-        #     continue
         # storing seen concepts' hint representations
         if args.hint_retriever:
             train_dataset.augment = False # this is not gonna work if there are multiple workers
@@ -860,7 +858,7 @@ if __name__ == "__main__":
         '(best_test_bleu_n4)', best_epoch,
         best_test_bleu_n4))
     if args.plot_bleu_score:
-        x = (np.array(range(len(val_acc_collection))) + 1) * 4
+        x = (np.array(range(len(val_acc_collection))) + 1)
         plt.plot(x, val_acc_collection, label = "validation accuracy")
         plt.plot(x, bleu_n1_collection, label = "bleu n=1")
         plt.plot(x, bleu_n2_collection, label = "bleu n=2")
