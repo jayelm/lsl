@@ -35,48 +35,6 @@ SHAPES = {
 }
 
 
-class ClassNoise:
-    def __init__(self, n, max_rgb=0.1):
-        self.n = n
-        self.max_rgb = max_rgb
-        self.dict = {}
-        self.colors = [
-            torch.zeros(3).uniform_(0, self.max_rgb) for i in range(n)
-        ]
-        self.curr_n = 0
-
-    def __getitem__(self, i):
-        if i not in self.dict:
-            self.dict[i] = self.colors[self.curr_n]
-            self.curr_n = (self.curr_n + 1) % self.n
-        return self.dict[i]
-
-    def __contains__(self, i):
-        return i in self.dict
-
-    def __len__(self):
-        return len(self.dict)
-
-    def random_noise(self, n):
-        if n == 1:
-            return torch.zeros(3).uniform_(0, self.max_rgb)
-        else:
-            noise = torch.zeros(n * 3).uniform_(0, self.max_rgb)
-            return noise.view(n, 3)
-
-
-def gen_class_noise(image_dim, noise, noise_type='gaussian'):
-    if noise_type == 'gaussian':
-        if noise != 0.0:
-            return torch.zeros(image_dim,
-                               requires_grad=False).normal_(0, noise)
-        else:
-            return torch.zeros(image_dim, requires_grad=False)
-    else:
-        return torch.zeros(image_dim,
-                           requires_grad=False).uniform_(-noise, noise)
-
-
 def get_max_hint_length(data_dir=None):
     """
     Get the maximum number of words in a sentence across all splits
@@ -173,17 +131,6 @@ class ShapeWorld(data.Dataset):
                 "Class noise weight must be between 0 and 1, got {}".format(
                     class_noise_weight))
         self.class_noise_weight = class_noise_weight
-
-        if self.fixed_noise_colors is not None:
-            self.class_noises = ClassNoise(
-                self.fixed_noise_colors,
-                max_rgb=self.fixed_noise_colors_max_rgb)
-        else:
-            self.class_noises = {
-                1: gen_class_noise(self.image_dim, self.noise,
-                                   self.noise_type),
-                0: gen_class_noise(self.image_dim, self.noise, self.noise_type)
-            }
 
         if data_dir is None:
             data_dir = DATA_DIR
@@ -421,101 +368,6 @@ class ShapeWorld(data.Dataset):
             batch_hint_length, batch_test_hint, batch_test_hint_length
         )
 
-    def add_fixed_noise_colors(self,
-                               support,
-                               query,
-                               support_hint,
-                               query_hint,
-                               clamp=False):
-        # Get hashable version of support/query hint
-        support_hash = tuple(support_hint.numpy().tolist())
-        query_hash = tuple(query_hint.numpy().tolist())
-        # Identify black parts of background image
-        # Class noise depends on support and query hints
-        support_class_noise = self.class_noises[support_hash]
-        query_class_noise = self.class_noises[query_hash]
-
-        # Random noise for instances
-        support_instance_noise = self.class_noises.random_noise(
-            support.shape[0])
-        query_instance_noise = self.class_noises.random_noise(1)
-
-        # Add dimensions to noise
-        support_class_noise = support_class_noise.unsqueeze(0).unsqueeze(
-            2).unsqueeze(3).expand_as(support)
-        query_class_noise = query_class_noise.unsqueeze(1).unsqueeze(
-            2).expand_as(query)
-        # BG color fixed for each image, so no need to unsqueeze along image dim
-        support_instance_noise = support_instance_noise.unsqueeze(2).unsqueeze(
-            3).expand_as(support)
-        query_instance_noise = query_instance_noise.unsqueeze(1).unsqueeze(
-            2).expand_as(query)
-
-        # Get mask of black pixels
-        support_mask = get_black_mask(support).float()
-        query_mask = get_black_mask(query).float()
-
-        # Combine class vs query noise
-        support_noise = (self.class_noise_weight * support_class_noise) + (
-            (1 - self.class_noise_weight) * support_instance_noise)
-        query_noise = (self.class_noise_weight * query_class_noise) + (
-            (1 - self.class_noise_weight) * query_instance_noise)
-
-        # Fill in black pixels with random color
-        support_noised = (
-            (1 - support_mask) * support) + (support_mask * support_noise)
-        query_noised = ((1 - query_mask) * query) + (query_mask * query_noise)
-
-        return support_noised, query_noised
-
-    def add_noise(self, support, query, y, clamp=False):
-        # Fixed pos/neg class noise
-        support_class_noise = self.class_noises[1]
-        query_class_noise = self.class_noises[y]
-
-        return self._add_noise(support,
-                               query,
-                               support_class_noise,
-                               query_class_noise,
-                               clamp=clamp)
-
-    def _add_noise(self,
-                   support,
-                   query,
-                   support_class_noise,
-                   query_class_noise,
-                   clamp=False):
-        # Expand to match examples
-        support_class_noise = support_class_noise.unsqueeze(0).expand_as(
-            support)
-        # Instance noise
-        if self.noise_type == 'gaussian':
-            support_instance_noise = torch.FloatTensor(*support.shape).normal_(
-                0, self.noise)
-            query_instance_noise = torch.FloatTensor(*query.shape).normal_(
-                0, self.noise)
-        else:
-            support_instance_noise = torch.FloatTensor(
-                *support.shape).uniform_(-self.noise, self.noise)
-            query_instance_noise = torch.FloatTensor(*query.shape).uniform_(
-                -self.noise, self.noise)
-
-        # Compute weighted noise
-        query_noise = (self.class_noise_weight * query_class_noise) + (
-            (1 - self.class_noise_weight) * query_instance_noise)
-        support_noise = (self.class_noise_weight * support_class_noise) + (
-            (1 - self.class_noise_weight) * support_instance_noise)
-
-        support_noised = support + support_noise
-        query_noised = query + query_noise
-
-        # Add to expands
-        if clamp:
-            support_noised = torch.clamp(support_noised, 0.0, 1.0)
-            query_noised = torch.clamp(query_noised, 0.0, 1.0)
-
-        return support_noised, query_noised
-
     def __getitem__(self, index):
         if self.split == 'train' and self.augment:
             examples, image, label, hint, hint_length, test_hint, test_hint_length = self.data[
@@ -555,21 +407,6 @@ class ShapeWorld(data.Dataset):
                 feats = torch.from_numpy(feats).float()
                 examples = torch.from_numpy(examples).float()
 
-                # this is a 0 since feats does not match this hint.
-                if self.fixed_noise_colors is not None:
-                    examples, feats = self.add_fixed_noise_colors(
-                        examples,
-                        feats,
-                        hint,
-                        test_hint,
-                        clamp=not self.precomputed_features)
-                else:
-                    examples, feats = self.add_noise(
-                        examples,
-                        feats,
-                        0,
-                        clamp=not self.precomputed_features)
-
                 if self.preprocess is not None:
                     feats = self.preprocess(feats)
                     examples = torch.stack(
@@ -596,20 +433,6 @@ class ShapeWorld(data.Dataset):
                 feats = torch.from_numpy(feats).float()
                 examples = torch.from_numpy(examples).float()
 
-                if self.fixed_noise_colors is not None:
-                    examples, feats = self.add_fixed_noise_colors(
-                        examples,
-                        feats,
-                        hint,
-                        test_hint,
-                        clamp=not self.precomputed_features)
-                else:
-                    examples, feats = self.add_noise(
-                        examples,
-                        feats,
-                        1,
-                        clamp=not self.precomputed_features)
-
                 if self.preprocess is not None:
                     feats = self.preprocess(feats)
                     examples = torch.stack(
@@ -627,18 +450,6 @@ class ShapeWorld(data.Dataset):
             hint = torch.from_numpy(hint).long()
             test_hint = torch.from_numpy(test_hint).long()
             examples = torch.from_numpy(examples).float()
-
-            # this is a 0 since feats does not match this hint.
-            if self.fixed_noise_colors is not None:
-                examples, image = self.add_fixed_noise_colors(
-                    examples,
-                    image,
-                    hint,
-                    test_hint,
-                    clamp=not self.precomputed_features)
-            else:
-                examples, image = self.add_noise(
-                    examples, image, 0, clamp=not self.precomputed_features)
 
             if self.preprocess is not None:
                 image = self.preprocess(image)
