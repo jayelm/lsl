@@ -113,7 +113,7 @@ class ArgumentParser:
                             choices=['add', 'mul'],
                             help='TRE Composition Function')
         parser.add_argument('--optimizer',
-                            choices=['adam', 'rmsprop', 'sgd'],
+                            choices=['adam', 'bertadam', 'rmsprop', 'sgd'],
                             default='adam',
                             help='Optimizer to use')
         parser.add_argument('--seed', type=int, default=1, help='Random seed')
@@ -157,4 +157,29 @@ class ArgumentParser:
 
 
     def parse_args(self):
-        return self.parser.parse_args()
+        args = self.parser.parse_args()
+
+        if args.oracle and not args.infer_hyp:
+            self.parser.error("Must specify --infer_hyp to use --oracle")
+
+        if args.hint_retriever and not args.infer_hyp:
+            self.parser.error("Must specify --infer_hyp to use --hint_retriever")
+
+        if args.multimodal_concept and not args.infer_hyp:
+            self.parser.error("Must specify --infer_hyp to use --multimodal_concept")
+
+        if args.poe and not args.infer_hyp:
+            self.parser.error("Must specify --infer_hyp to use --poe")
+
+        if args.dropout > 0.0 and args.comparison == 'dotp':
+            raise NotImplementedError
+        
+        args.predict_hyp = args.predict_concept_hyp or args.predict_image_hyp
+        args.use_hyp = args.predict_hyp or args.infer_hyp
+        args.encode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'embed')
+        args.decode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'generate')
+
+        if args.oracle or args.hint_retriever: 
+            args.n_infer = 1  # No need to repeatedly infer, hint is given
+        
+        return args

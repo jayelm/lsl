@@ -1,6 +1,10 @@
 #!/bin/bash
 
-python lsl/train.py --cuda \
-    --batch_size 100 \
+CUDA_VISIBLE_DEVICES=1 python -u lsl/train.py --cuda \
+    --batch_size 64 \
     --seed $RANDOM \
-    exp/meta
+    --lr 1e-6 \
+    --epochs 150 \
+    --backbone lxmert \
+    --optimizer bertadam \
+    exp/meta > debug.out

@@ -8,6 +8,7 @@ from tqdm import tqdm
 from collections import defaultdict
 from sklearn.metrics import accuracy_score
 from torchtext.data.metrics import bleu_score
+import wandb
 
 import torch
 import torch.nn as nn
@@ -19,8 +20,12 @@ from utils import (
     save_defaultdict_to_fs,
     idx2word,
 )
+
+from arguments import ArgumentParser
+from bertadam import BertAdam
 from datasets import ShapeWorld, extract_features
 from datasets import SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
+from lxmert import Lxmert
 from models import ImageRep, TextRep, TextProposal, ExWrapper
 from models import MultimodalRep,MultimodalDeepRep
 from models import DotPScorer, BilinearScorer
@@ -28,8 +33,6 @@ from vision import Conv4NP, ResNet18
 from tre import AddComp, MulComp, CosDist, L1Dist, L2Dist, tre
 from retrievers import construct_dict, gen_retriever
 import matplotlib.pyplot as plt
-from arguments import ArgumentParser
-from lxmert import Lxmert
 
 TRE_COMP_FNS = {
     'add': AddComp,
@@ -63,28 +66,6 @@ def combine_feats(all_feats):
 
 if __name__ == "__main__":
     args = ArgumentParser().parse_args()
-
-    if args.oracle and not args.infer_hyp:
-        parser.error("Must specify --infer_hyp to use --oracle")
-
-    if args.hint_retriever and not args.infer_hyp:
-        parser.error("Must specify --infer_hyp to use --hint_retriever")
-
-    if args.multimodal_concept and not args.infer_hyp:
-        parser.error("Must specify --infer_hyp to use --multimodal_concept")
-
-    if args.poe and not args.infer_hyp:
-        parser.error("Must specify --infer_hyp to use --poe")
-
-    if args.dropout > 0.0 and args.comparison == 'dotp':
-        raise NotImplementedError
-    args.predict_hyp = args.predict_concept_hyp or args.predict_image_hyp
-    args.use_hyp = args.predict_hyp or args.infer_hyp
-    args.encode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'embed')
-    args.decode_hyp = args.infer_hyp or (args.predict_hyp and args.predict_hyp_task == 'generate')
-
-    if args.oracle or args.hint_retriever: 
-        args.n_infer = 1  # No need to repeatedly infer, hint is given
 
     if not os.path.isdir(args.exp_dir):
         os.makedirs(args.exp_dir)
@@ -194,14 +175,14 @@ if __name__ == "__main__":
     elif args.backbone == 'resnet18':
         backbone_model = ResNet18()
     elif args.backbone == 'lxmert':
-        pass
+        backbone_model = Lxmert(train_vocab_size, 768, 9408, 4, pretrained=False)
     else:
         raise NotImplementedError(args.backbone)
 
     if args.hint_retriever:
         image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512), retrieve_mode=True)
-    elif args.backbone == "lxmert":
-        image_model = Lxmert(train_vocab_size, 768, 9408, 4)
+    elif args.backbone == 'lxmert':
+        image_model = backbone_model
     else:
         image_model = ExWrapper(ImageRep(backbone_model, hidden_size=512))
     image_model = image_model.to(device)
@@ -243,11 +224,17 @@ if __name__ == "__main__":
     optfunc = {
         'adam': optim.Adam,
         'rmsprop': optim.RMSprop,
-        'sgd': optim.SGD
+        'sgd': optim.SGD,
+        'bertadam': BertAdam
     }[args.optimizer]
-    #optimizer = optfunc(params_to_optimize, lr=args.lr)
-    from bertAdam import BertAdam
-    optimizer = BertAdam(list(image_model.parameters()), lr=args.lr)
+    optimizer = optfunc(params_to_optimize, lr=args.lr)
+
+    # initialize weight and bias
+    wandb.init(project='lsl', entity='bhy070418s')
+    config = wandb.config
+    config.learning_rate = args.lr
+
+    wandb.watch(image_model)
 
     def train(epoch, n_steps=100):
         image_model.train()
@@ -261,10 +248,12 @@ if __name__ == "__main__":
 
         loss_total = 0
         pbar = tqdm(total=n_steps)
-        accuracy = []
         for batch_idx in range(n_steps):
             examples, image, label, hint_seq, hint_length, *rest = \
                 train_dataset.sample_train(args.batch_size)
+
+            examples = F.normalize(examples, dim=-1)
+            image = F.normalize(image, dim=-1)
 
             examples = examples.to(device)
             image = image.to(device)
@@ -284,7 +273,7 @@ if __name__ == "__main__":
             # Learn representations of images and examples
             image_rep = image_model(image)
             examples_rep = image_model(examples)
-            examples_rep_mean = examples_rep #torch.mean(examples_rep, dim=1)
+            examples_rep_mean = torch.mean(examples_rep, dim=1)
 
             # Prediction loss
             if args.infer_hyp:
@@ -328,8 +317,6 @@ if __name__ == "__main__":
                 pred_loss = F.binary_cross_entropy_with_logits(
                     score, label.float())
 
-                pred = (score > 0).int()
-                accuracy.extend((pred == label).float())
             # Hypothesis loss
             if args.use_hyp:
                 # How plausible is the true hint under example/image rep?
@@ -384,7 +371,6 @@ if __name__ == "__main__":
 
             pbar.update()
         pbar.close()
-        print(torch.mean(torch.tensor(accuracy)))
         print('====> {:>12}\tEpoch: {:>3}\tLoss: {:.4f}'.format(
             '(train)', epoch, loss_total))
 
@@ -409,11 +395,10 @@ if __name__ == "__main__":
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
-            idx = 0
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
-                if idx > len(data_loader) // 8:
-                    break
-                idx += 1
+                examples = F.normalize(examples, dim=-1)
+                image = F.normalize(image, dim=-1)
+                
                 examples = examples.to(device)
                 image = image.to(device)
                 label = label.to(device)
@@ -425,7 +410,8 @@ if __name__ == "__main__":
                 if not args.oracle or args.multimodal_concept or args.poe:
                     # Compute example representation
                     examples_rep = image_model(examples)
-                    examples_rep_mean = examples_rep #torch.mean(examples_rep, dim=1)
+                    examples_rep_mean = torch.mean(examples_rep, dim=1)
+
                 if args.hint_retriever:
                     # retrieve the hint representation of the closest concept
                     closest_neighbor_idx = gen_retriever(args.hint_retriever)(examples_rep_mean, hint_rep_dict[0]) 
@@ -620,13 +606,14 @@ if __name__ == "__main__":
         test_acc, test_raw_scores, test_bleu_n1, test_bleu_n2, test_bleu_n3, test_bleu_n4 = test(epoch, 'test', hint_rep_dict)
         if has_same:
             val_same_acc, _, _, _, _, _ = test(epoch, 'val_same', hint_rep_dict)
-            test_same_acc, test_same_raw_scores, test_same_bleu_n1, test_same_bleu_n2, test_same_bleu_n3, test_same_bleu_n4 = test(epoch, 'test_same', hint_rep_dict)
+            test_same_acc, test_same_raw_scores, test_same_bleu_n1, test_same_bleu_n2, test_same_bleu_n3, test_same_bleu_n4 = test(epoch, 'test_same', hint_rep_dict)    
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
             test_same_acc = test_acc
             all_test_raw_scores = test_raw_scores
 
+        wandb.log({"loss": train_loss, 'train_acc': train_acc, 'val_same_acc': val_same_acc, 'val_acc': val_acc, 'test_same_acc': test_same_acc, 'test_acc': test_acc})
         # Compute confidence intervals
         n_test = len(all_test_raw_scores)
         test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)
