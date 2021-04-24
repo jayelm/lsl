@@ -7,7 +7,7 @@ PATCH_SIZE = 56
 
 class Lxmert(nn.Module):
 
-    def __init__(self, vocab_size, hidden_size, visual_feat_dim, visual_pos_dim, pretrained=False):
+    def __init__(self, vocab_size, hidden_size, visual_feat_dim, visual_pos_dim, initializer_range, pretrained=False):
         super().__init__()
         
         self.pretrained = pretrained
@@ -16,13 +16,13 @@ class Lxmert(nn.Module):
             self.lxmert = LxmertModel.from_pretrained('unc-nlp/lxmert-base-uncased')
         else:
             config = LxmertConfig(vocab_size=vocab_size, hidden_size=hidden_size, \
-               visual_feat_dim=visual_feat_dim, visual_pos_dim=visual_pos_dim)
+               visual_feat_dim=visual_feat_dim, visual_pos_dim=visual_pos_dim, initializer_range=initializer_range, task_matched=False)
+            
             self.lxmert = LxmertModel(config)
 
     def gen_visual_pos(self, batch_size, num_visual_features):
         grid = int(num_visual_features ** (1/2))
         visual_pos = [[[i/grid, j/grid, 1/grid, 1/grid] for i in range(grid) for j in range(grid)] for _ in range(batch_size)]
-        
         return torch.tensor(visual_pos).to(self.lxmert.device)
 
     def forward(self, visual_feats, visual_pos=None, input_ids=None):
@@ -44,6 +44,7 @@ class Lxmert(nn.Module):
         else:
             out = self.lxmert(dummy_hints, visual_patches, visual_pos).pooled_output
 
+        out = nn.functional.normalize(out, dim=-1)
         if original_shape:
             return out.reshape(*original_shape[:2], -1)
         else:

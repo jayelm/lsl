@@ -6,7 +6,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, recall_score, precision_score
 from torchtext.data.metrics import bleu_score
 import wandb
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     elif args.backbone == 'resnet18':
         backbone_model = ResNet18()
     elif args.backbone == 'lxmert':
-        backbone_model = Lxmert(train_vocab_size, 768, 9408, 4, pretrained=False)
+        backbone_model = Lxmert(train_vocab_size, 768, 9408, 4, args.initializer_range, pretrained=False)
     else:
         raise NotImplementedError(args.backbone)
 
@@ -227,7 +227,9 @@ if __name__ == "__main__":
         'sgd': optim.SGD,
         'bertadam': BertAdam
     }[args.optimizer]
-    optimizer = optfunc(params_to_optimize, lr=args.lr)
+
+    t_total = int(args.batch_size * args.epochs)
+    optimizer = optfunc(params_to_optimize, lr=args.lr, warmup=args.warmup_ratio, t_total=t_total)
 
     # initialize weight and bias
     wandb.init(project='lsl', entity='bhy070418s')
@@ -252,9 +254,6 @@ if __name__ == "__main__":
             examples, image, label, hint_seq, hint_length, *rest = \
                 train_dataset.sample_train(args.batch_size)
 
-            examples = F.normalize(examples, dim=-1)
-            image = F.normalize(image, dim=-1)
-
             examples = examples.to(device)
             image = image.to(device)
             label = label.to(device)
@@ -274,7 +273,7 @@ if __name__ == "__main__":
             image_rep = image_model(image)
             examples_rep = image_model(examples)
             examples_rep_mean = torch.mean(examples_rep, dim=1)
-
+            
             # Prediction loss
             if args.infer_hyp:
                 # Use hypothesis to compute prediction loss
@@ -387,6 +386,8 @@ if __name__ == "__main__":
                 multimodal_model.eval()
 
         accuracy_meter = AverageMeter(raw=True)
+        precision_meter = AverageMeter(raw=True)
+        recall_meter = AverageMeter(raw=True)
         retrival_acc_meter = AverageMeter(raw=True)
         bleu_meter_n1 = AverageMeter(raw=True)
         bleu_meter_n2 = AverageMeter(raw=True)
@@ -395,9 +396,11 @@ if __name__ == "__main__":
         data_loader = data_loader_dict[split]
 
         with torch.no_grad():
+            idx = 0
             for examples, image, label, hint_seq, hint_length, *rest in data_loader:
-                examples = F.normalize(examples, dim=-1)
-                image = F.normalize(image, dim=-1)
+                if idx > len(data_loader) // 2:
+                    break
+                idx += 1
                 
                 examples = examples.to(device)
                 image = image.to(device)
@@ -496,6 +499,8 @@ if __name__ == "__main__":
                     bleu_n1 = bleu_score(hint_seq, support_hint, max_n=1, weights=[1.0])
                     bleu_meter_n1.update(bleu_n1, batch_size, raw_scores=[bleu_n1])
                     accuracy = accuracy_score(label_np, best_predictions)
+                    precision = precision_score(label_np, best_predictions)
+                    recall = recall_score(label_np, best_predictions)
                 else:
                     # Compare image directly to example rep
                     score = scorer_model.score(examples_rep_mean, image_rep)
@@ -504,13 +509,25 @@ if __name__ == "__main__":
                     label_hat = label_hat.cpu().numpy()
 
                     accuracy = accuracy_score(label_np, label_hat)
+                    precision = precision_score(label_np, label_hat)
+                    recall = recall_score(label_np, label_hat)
+
                 accuracy_meter.update(accuracy,
                                       batch_size,
                                       raw_scores=(label_hat == label_np))
+                precision_meter.update(precision,
+                                      batch_size,
+                                      raw_scores=[precision])
+                recall_meter.update(recall,
+                                      batch_size,
+                                      raw_scores=[recall])
 
-        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tBLEU_n1 Score: {:.4f}\tBLEU_n2 Score: {:.4f} \tBLEU_n3 Score: {:.4f}\tBLEU_n4 Score: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
-            '({})'.format(split), epoch, accuracy_meter.avg, bleu_meter_n1.avg, bleu_meter_n2.avg, bleu_meter_n3.avg, bleu_meter_n4.avg, retrival_acc_meter.avg))
-        return accuracy_meter.avg, accuracy_meter.raw_scores, bleu_meter_n1.avg, bleu_meter_n2.avg, bleu_meter_n3.avg, bleu_meter_n4.avg
+        print('====> {:>12}\tEpoch: {:>3}\tAccuracy: {:.4f}\tPrecision: {:.4f}\tRecall: {:.4f}\
+            \tBLEU_n1 Score: {:.4f}\tBLEU_n2 Score: {:.4f} \tBLEU_n3 Score: {:.4f}\tBLEU_n4 Score: {:.4f}\tRetrieval Accuracy: {:.4f}'.format(
+            '({})'.format(split), epoch, accuracy_meter.avg, precision_meter.avg, recall_meter.avg, \
+                bleu_meter_n1.avg, bleu_meter_n2.avg, bleu_meter_n3.avg, bleu_meter_n4.avg, retrival_acc_meter.avg))
+        return accuracy_meter.avg, accuracy_meter.raw_scores, precision_meter.avg, recall_meter.avg, \
+            bleu_meter_n1.avg, bleu_meter_n2.avg, bleu_meter_n3.avg, bleu_meter_n4.avg
 
     tre_comp_fn = TRE_COMP_FNS[args.tre_comp]()
     tre_err_fn = TRE_ERR_FNS[args.tre_err]()
@@ -592,28 +609,37 @@ if __name__ == "__main__":
     hint_rep_dict = None
     for epoch in range(1, args.epochs + 1):
         train_loss = train(epoch)
+        if epoch % 10 != 1:
+            continue
         # storing seen concepts' hint representations
         if args.hint_retriever:
             train_dataset.augment = False # this is not gonna work if there are multiple workers
             hint_rep_dict = construct_dict(train_loader, image_model, hint_model)
             train_dataset.augment = True
-        train_acc, _, _, _, _, _= test(epoch, 'train', hint_rep_dict)
-        val_acc, _, _, _, _, _= test(epoch, 'val', hint_rep_dict)
+        train_acc, _, train_prec, train_reca, *_ = test(epoch, 'train', hint_rep_dict)
+        val_acc, _, val_prec, val_reca, *_ = test(epoch, 'val', hint_rep_dict)
         # Evaluate tre on validation set
         #  val_tre, val_tre_std = eval_tre(epoch, 'val')
         val_tre, val_tre_std = 0.0, 0.0
 
-        test_acc, test_raw_scores, test_bleu_n1, test_bleu_n2, test_bleu_n3, test_bleu_n4 = test(epoch, 'test', hint_rep_dict)
+        test_acc, test_raw_scores, test_prec, test_reca, \
+            test_bleu_n1, test_bleu_n2, test_bleu_n3, test_bleu_n4 = test(epoch, 'test', hint_rep_dict)
         if has_same:
-            val_same_acc, _, _, _, _, _ = test(epoch, 'val_same', hint_rep_dict)
-            test_same_acc, test_same_raw_scores, test_same_bleu_n1, test_same_bleu_n2, test_same_bleu_n3, test_same_bleu_n4 = test(epoch, 'test_same', hint_rep_dict)    
+            val_same_acc, _, val_same_prec, val_same_reca, *_ = test(epoch, 'val_same', hint_rep_dict)
+            test_same_acc, test_same_raw_scores, test_same_prec, test_same_reca,\
+                test_same_bleu_n1, test_same_bleu_n2, test_same_bleu_n3, test_same_bleu_n4 = test(epoch, 'test_same', hint_rep_dict)    
             all_test_raw_scores = test_raw_scores + test_same_raw_scores
         else:
             val_same_acc = val_acc
             test_same_acc = test_acc
             all_test_raw_scores = test_raw_scores
 
-        wandb.log({"loss": train_loss, 'train_acc': train_acc, 'val_same_acc': val_same_acc, 'val_acc': val_acc, 'test_same_acc': test_same_acc, 'test_acc': test_acc})
+        wandb.log({"loss": train_loss, 'train_acc': train_acc, 'train_prec': train_prec, 'train_reca': train_reca,\
+            'val_same_acc': val_same_acc, 'val_same_prec': val_same_prec, 'val_same_reca': val_same_reca,\
+            'val_acc': val_acc,'val_prec': val_prec, 'val_reca': val_reca,\
+            'test_same_acc': test_same_acc, 'test_same_prec': test_same_prec, 'test_same_reca': test_same_reca,\
+            'test_acc': test_acc, 'test_prec': test_prec, 'test_reca': test_reca})
+        
         # Compute confidence intervals
         n_test = len(all_test_raw_scores)
         test_acc_ci = 1.96 * np.std(all_test_raw_scores) / np.sqrt(n_test)

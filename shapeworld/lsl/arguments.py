@@ -104,6 +104,14 @@ class ArgumentParser:
                             type=float,
                             default=0.0001,
                             help='Learning rate')
+        parser.add_argument('--warmup_ratio',
+                            type=float,
+                            default=0.05,
+                            help='Warm up ratio')
+        parser.add_argument('--initializer_range',
+                            type=float,
+                            default=0.02,
+                            help='The std of the truncated_normal_initializer for initializing all weights')
         parser.add_argument('--tre_err',
                             default='cos',
                             choices=['cos', 'l1', 'l2'],
