@@ -6,3 +6,4 @@
 sync_results.sh
 *.out
 *copy.*
+**/wandb/*

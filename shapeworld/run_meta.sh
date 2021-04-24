@@ -4,7 +4,9 @@ CUDA_VISIBLE_DEVICES=1 python -u lsl/train.py --cuda \
     --batch_size 64 \
     --seed $RANDOM \
     --lr 1e-6 \
-    --epochs 150 \
+    --warmup_ratio 0.05 \
+    --initializer_range 0.02 \
+    --epochs 200 \
     --backbone lxmert \
     --optimizer bertadam \
-    exp/meta > debug.out
+    exp/meta > de2.out
