@@ -16,7 +16,7 @@ class Lxmert(nn.Module):
             self.lxmert = LxmertModel.from_pretrained('unc-nlp/lxmert-base-uncased')
         else:
             config = LxmertConfig(vocab_size=vocab_size, hidden_size=hidden_size, \
-               visual_feat_dim=visual_feat_dim, visual_pos_dim=visual_pos_dim, initializer_range=initializer_range, task_matched=False)
+               visual_feat_dim=visual_feat_dim, visual_pos_dim=visual_pos_dim, initializer_range=initializer_range)
             
             self.lxmert = LxmertModel(config)
 
