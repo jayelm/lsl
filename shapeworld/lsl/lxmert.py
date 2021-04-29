@@ -34,15 +34,17 @@ class Lxmert(nn.Module):
         elif len(visual_feats.shape) == 4:
             visual_patches = rearrange(visual_feats, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = PATCH_SIZE, p2 = PATCH_SIZE)
         
-        dummy_hints = torch.tensor([[1, 0, 2] for _ in range(visual_patches.shape[0])]).reshape((visual_patches.shape[0], -1)).cuda()
+        if input_ids is None:
+            # dummy tokens TODO: move to train
+            input_ids = torch.tensor([[1, 0, 2] for _ in range(visual_patches.shape[0])]).reshape((visual_patches.shape[0], -1)).cuda()
         
         if visual_pos is None:
             visual_pos = self.gen_visual_pos(visual_patches.shape[0], visual_patches.shape[1])
         
         if self.pretrained:
-            out = self.lxmert(dummy_hints, self.visual_proj(visual_patches), visual_pos).pooled_output
+            out = self.lxmert(input_ids, self.visual_proj(visual_patches), visual_pos).pooled_output
         else:
-            out = self.lxmert(dummy_hints, visual_patches, visual_pos).pooled_output
+            out = self.lxmert(input_ids, visual_patches, visual_pos).pooled_output
 
         out = nn.functional.normalize(out, dim=-1)
         if original_shape:
