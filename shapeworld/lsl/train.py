@@ -232,7 +232,7 @@ if __name__ == "__main__":
     optimizer = optfunc(params_to_optimize, lr=args.lr, warmup=args.warmup_ratio, t_total=t_total)
 
     # initialize weight and bias
-    wandb.init(project='lsl', entity='bhy070418s')
+    wandb.init(project='v_dev', entity='lsl')
     config = wandb.config
     config.learning_rate = args.lr
 
